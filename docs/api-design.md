@@ -37,3 +37,83 @@ Response: `201 Created`
   "name": "hcm-edge",
   "region": "hcm",
   "status": "Pending",
+  "managedBy": "manual",
+  "lastSeenAt": null
+}
+```
+
+### GET /satellites
+List toàn bộ Satellite. Hỗ trợ query param `?region=` và `?status=` để filter.
+
+### GET /satellites/{id}
+Lấy chi tiết 1 Satellite.
+
+### PATCH /satellites/{id}
+Cập nhật field (region, v.v.). Trả `403` nếu `managedBy: operator` và request không có header service-account của Operator.
+
+### DELETE /satellites/{id}
+Xóa Satellite. Cùng rule `managedBy` như PATCH.
+
+### POST /satellites/{id}/heartbeat
+Agent gọi định kỳ (mỗi 30s — xem Phase 6.5).
+
+Request:
+```json
+{ "status": "Ready" }
+```
+Hiệu ứng: cập nhật `lastSeenAt = now()`, `status = Ready`.
+Nếu không nhận heartbeat trong > 90s → background job set `status = Unreachable`.
+
+### GET /satellites/{id}/status
+Trả về status + lastSeenAt hiện tại — dùng cho `fleetctl health` hoặc dashboard.
+
+## 4. User
+
+### POST /users
+Chỉ `admin` được gọi.
+```json
+{ "username": "viewer1", "password": "...", "role": "viewer" }
+```
+
+### GET /users
+List user (admin only).
+
+### DELETE /users/{id}
+Admin only.
+
+## 5. Health & Version
+
+### GET /health
+```json
+{ "status": "ok", "db": "connected" }
+```
+Không cần auth — dùng cho liveness probe.
+
+### GET /version
+```json
+{ "version": "v0.1.0", "commit": "abc1234" }
+```
+
+## 6. Error format chuẩn (áp dụng toàn bộ API)
+
+```json
+{
+  "error": {
+    "code": "SATELLITE_MANAGED_BY_OPERATOR",
+    "message": "This satellite is managed by GitOps and cannot be edited manually."
+  }
+}
+```
+
+## 7. Status codes dùng nhất quán
+
+| Code | Trường hợp |
+|---|---|
+| 200 | GET/PATCH thành công |
+| 201 | POST tạo mới thành công |
+| 204 | DELETE thành công |
+| 400 | Validation lỗi |
+| 401 | Thiếu/sai token |
+| 403 | Đúng quyền nhưng bị chặn bởi rule `managedBy` hoặc role |
+| 404 | Resource không tồn tại |
+| 409 | Conflict (ví dụ tạo Satellite trùng name) |
