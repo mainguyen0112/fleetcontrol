@@ -1,6 +1,6 @@
 # FleetControl - Architecture
 
-## 1. Tổng quan kiến trúc
+## 1. High-Level Architecture
 
 ```text
 Developer / Platform Engineer
@@ -15,17 +15,17 @@ Developer / Platform Engineer
             ↓
         PostgreSQL
             ↓
-     Satellite Agent (chạy tại mỗi edge site, heartbeat về API)
+     Satellite Agent (runs at each edge site, heartbeats back to the API)
 ```
 
-## 2. Source of Truth (quyết định quan trọng)
+## 2. Source of Truth (key decision)
 
-- **GitOps/CRD là con đường chính thức** để tạo/sửa Satellite trong môi trường production.
-- `fleetctl satellite create/update/delete` chỉ dùng cho dev/test/debug, không dùng cho fleet thật.
-- Mỗi Satellite có field `managedBy`:
-  - `operator` — được tạo qua CRD/GitOps
-  - `manual` — được tạo qua CLI trực tiếp
-- Nếu CLI cố sửa một Satellite có `managedBy: operator`, hệ thống sẽ cảnh báo hoặc từ chối.
+- **GitOps/CRD is the official path** for creating/updating Satellites in a production-like environment.
+- `fleetctl satellite create/update/delete` is intended for **dev/test/debug only**, not for managing the real fleet.
+- Each Satellite has a `managedBy` field:
+  - `operator` — created via CRD/GitOps
+  - `manual` — created directly via the CLI
+- If the CLI attempts to modify a Satellite with `managedBy: operator`, the system will warn or reject the operation.
 
 ## 3. Domain Model
 
@@ -46,16 +46,16 @@ type User struct {
 }
 ```
 
-## 4. Các thành phần chính
+## 4. Core Components
 
-| Thành phần | Vai trò | Công nghệ |
+| Component | Role | Tech Stack |
 |---|---|---|
-| Control Plane API | Lưu trữ state, expose REST API | Go + PostgreSQL |
-| Fleet CLI (fleetctl) | Tương tác thủ công/dev với API | Go + Cobra |
-| Fleet Operator | Reconcile CRD ↔ API | Kubebuilder + controller-runtime |
-| Satellite Agent | Process thật chạy ở edge site, heartbeat | Go |
+| Control Plane API | Stores state, exposes REST API | Go + PostgreSQL |
+| Fleet CLI (fleetctl) | Manual/dev interaction with the API | Go + Cobra |
+| Fleet Operator | Reconciles CRD ↔ API | Kubebuilder + controller-runtime |
+| Satellite Agent | A real process running at the edge site, sends heartbeats | Go |
 
-## 5. Câu hỏi đã trả lời (tự kiểm tra Phase 0)
+## 5. Open Questions Answered (Phase 0 self-check)
 
-- Ai được phép sửa Satellite? → Operator (qua GitOps) là chính thức; CLI chỉ dùng dev/test.
-- Chuyện gì xảy ra nếu CLI và Git cùng sửa một Satellite? → `managedBy` ngăn xung đột; CLI cảnh báo nếu cố sửa resource do operator quản lý.
+- Who is allowed to modify a Satellite? → The Operator (via GitOps) is the official path; the CLI is for dev/test only.
+- What happens if the CLI and Git both try to modify the same Satellite? → `managedBy` prevents conflicts; the CLI warns when attempting to edit a resource managed by the Operator.

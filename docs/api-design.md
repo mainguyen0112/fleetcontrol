@@ -1,10 +1,10 @@
 # FleetControl - API Design
 
-## 1. Nguyên tắc thiết kế
+## 1. Design Principles
 
-- API được thiết kế theo hướng **OpenAPI-first** (Phase 3) — nội dung dưới đây là bản nháp tay trước, sẽ chuyển thành `openapi.yaml` chính thức sau.
-- Tất cả route trừ `/health`, `/version`, `/auth/login` đều yêu cầu JWT hợp lệ.
-- Field `managedBy` quyết định ai có quyền sửa: client cố sửa Satellite có `managedBy: operator` qua route thủ công sẽ bị từ chối (403) trừ khi request đến từ Operator's service account.
+- The API follows an **OpenAPI-first** approach (Phase 3) — the content below is a hand-written draft that will later become the authoritative `openapi.yaml`.
+- All routes except `/health`, `/version`, and `/auth/login` require a valid JWT.
+- The `managedBy` field determines edit permissions: a client attempting to modify a Satellite with `managedBy: operator` through a manual route will be rejected (403) unless the request comes from the Operator's service account.
 
 ## 2. Auth
 
@@ -19,12 +19,12 @@ Response:
 ```
 
 ### POST /auth/refresh
-Làm mới token khi gần hết hạn.
+Refreshes the token before it expires.
 
 ## 3. Satellite
 
 ### POST /satellites
-Tạo Satellite mới. Mặc định `managedBy: manual` nếu gọi qua CLI/API trực tiếp; Operator gọi với header riêng để set `managedBy: operator`.
+Creates a new Satellite. Defaults to `managedBy: manual` when called via CLI/direct API; the Operator calls this with a dedicated header to set `managedBy: operator`.
 
 Request:
 ```json
@@ -43,40 +43,40 @@ Response: `201 Created`
 ```
 
 ### GET /satellites
-List toàn bộ Satellite. Hỗ trợ query param `?region=` và `?status=` để filter.
+Lists all Satellites. Supports query params `?region=` and `?status=` for filtering.
 
 ### GET /satellites/{id}
-Lấy chi tiết 1 Satellite.
+Retrieves details of a single Satellite.
 
 ### PATCH /satellites/{id}
-Cập nhật field (region, v.v.). Trả `403` nếu `managedBy: operator` và request không có header service-account của Operator.
+Updates fields (region, etc.). Returns `403` if `managedBy: operator` and the request lacks the Operator's service-account header.
 
 ### DELETE /satellites/{id}
-Xóa Satellite. Cùng rule `managedBy` như PATCH.
+Deletes a Satellite. Same `managedBy` rule as PATCH.
 
 ### POST /satellites/{id}/heartbeat
-Agent gọi định kỳ (mỗi 30s — xem Phase 6.5).
+Called periodically by the Agent (every 30s — see Phase 6.5).
 
 Request:
 ```json
 { "status": "Ready" }
 ```
-Hiệu ứng: cập nhật `lastSeenAt = now()`, `status = Ready`.
-Nếu không nhận heartbeat trong > 90s → background job set `status = Unreachable`.
+Effect: updates `lastSeenAt = now()`, `status = Ready`.
+If no heartbeat is received for > 90s → a background job sets `status = Unreachable`.
 
 ### GET /satellites/{id}/status
-Trả về status + lastSeenAt hiện tại — dùng cho `fleetctl health` hoặc dashboard.
+Returns current status + lastSeenAt — used by `fleetctl health` or a dashboard.
 
 ## 4. User
 
 ### POST /users
-Chỉ `admin` được gọi.
+Admin only.
 ```json
 { "username": "viewer1", "password": "...", "role": "viewer" }
 ```
 
 ### GET /users
-List user (admin only).
+Lists users (admin only).
 
 ### DELETE /users/{id}
 Admin only.
@@ -87,14 +87,14 @@ Admin only.
 ```json
 { "status": "ok", "db": "connected" }
 ```
-Không cần auth — dùng cho liveness probe.
+No auth required — used for liveness probes.
 
 ### GET /version
 ```json
 { "version": "v0.1.0", "commit": "abc1234" }
 ```
 
-## 6. Error format chuẩn (áp dụng toàn bộ API)
+## 6. Standard Error Format (applies to the entire API)
 
 ```json
 {
@@ -105,15 +105,15 @@ Không cần auth — dùng cho liveness probe.
 }
 ```
 
-## 7. Status codes dùng nhất quán
+## 7. Status Codes Used Consistently
 
-| Code | Trường hợp |
+| Code | Case |
 |---|---|
-| 200 | GET/PATCH thành công |
-| 201 | POST tạo mới thành công |
-| 204 | DELETE thành công |
-| 400 | Validation lỗi |
-| 401 | Thiếu/sai token |
-| 403 | Đúng quyền nhưng bị chặn bởi rule `managedBy` hoặc role |
-| 404 | Resource không tồn tại |
-| 409 | Conflict (ví dụ tạo Satellite trùng name) |
+| 200 | Successful GET/PATCH |
+| 201 | Successful creation via POST |
+| 204 | Successful DELETE |
+| 400 | Validation error |
+| 401 | Missing/invalid token |
+| 403 | Valid permission but blocked by `managedBy` rule or role |
+| 404 | Resource not found |
+| 409 | Conflict (e.g. duplicate Satellite name) |
