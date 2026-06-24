@@ -1,0 +1,32 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - fleetcontrol.fleetcontrol.io
+  resources:
+  - satellites
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - fleetcontrol.fleetcontrol.io
+  resources:
+  - satellites/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - fleetcontrol.fleetcontrol.io
+  resources:
+  - satellites/status
+  verbs:
+  - get
+  - patch
+  - update
