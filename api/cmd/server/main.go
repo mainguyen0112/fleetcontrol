@@ -10,6 +10,7 @@ import (
 	"github.com/mainguyen0112/fleetcontrol/api/internal/auth"
 	"github.com/mainguyen0112/fleetcontrol/api/internal/config"
 	"github.com/mainguyen0112/fleetcontrol/api/internal/db"
+	"github.com/mainguyen0112/fleetcontrol/api/internal/satellite"
 	"github.com/mainguyen0112/fleetcontrol/api/pkg/logger"
 )
 
@@ -30,8 +31,17 @@ func main() {
 
 	authHandler := &auth.Handler{DB: pool, Secret: cfg.JWTSecret}
 
+	satRepo := satellite.NewPostgresRepository(pool)
+	satService := satellite.NewService(satRepo)
+	satHandler := satellite.NewHandler(satService)
+
 	r := chi.NewRouter()
 	r.Post("/auth/login", authHandler.Login)
+
+	r.Group(func(r chi.Router) {
+		r.Use(auth.Middleware(cfg.JWTSecret))
+		r.Post("/satellites", satHandler.Create)
+	})
 
 	log.Info("server listening", zap.String("port", cfg.Port))
 	if err := http.ListenAndServe(":"+cfg.Port, r); err != nil {
