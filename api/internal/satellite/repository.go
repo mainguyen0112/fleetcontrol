@@ -8,22 +8,28 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+type Repository interface {
+	Create(ctx context.Context, s *Satellite) (*Satellite, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*Satellite, error)
+	List(ctx context.Context) ([]*Satellite, error)
+}
+
 type PostgresRepository struct {
-	DB *pgxpool.Pool
+	db *pgxpool.Pool
 }
 
 func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository {
-	return &PostgresRepository{DB: db}
+	return &PostgresRepository{db: db}
 }
 
 func (r *PostgresRepository) Create(ctx context.Context, s *Satellite) (*Satellite, error) {
 	query := `
 		INSERT INTO satellites (name, region, status, managed_by)
-		VALUES ($1, $2, 'Pending', $3)
+		VALUES ($1, $2, $3, $4)
 		RETURNING id, name, region, status, managed_by, last_seen_at, created_at
 	`
 	var out Satellite
-	err := r.DB.QueryRow(ctx, query, s.Name, s.Region, s.ManagedBy).Scan(
+	err := r.db.QueryRow(ctx, query, s.Name, s.Region, s.Status, s.ManagedBy).Scan(
 		&out.ID, &out.Name, &out.Region, &out.Status, &out.ManagedBy, &out.LastSeenAt, &out.CreatedAt,
 	)
 	if err != nil {
@@ -38,7 +44,7 @@ func (r *PostgresRepository) GetByID(ctx context.Context, id uuid.UUID) (*Satell
 		FROM satellites WHERE id = $1
 	`
 	var out Satellite
-	err := r.DB.QueryRow(ctx, query, id).Scan(
+	err := r.db.QueryRow(ctx, query, id).Scan(
 		&out.ID, &out.Name, &out.Region, &out.Status, &out.ManagedBy, &out.LastSeenAt, &out.CreatedAt,
 	)
 	if err != nil {
@@ -55,7 +61,7 @@ func (r *PostgresRepository) List(ctx context.Context) ([]*Satellite, error) {
 		SELECT id, name, region, status, managed_by, last_seen_at, created_at
 		FROM satellites ORDER BY created_at DESC
 	`
-	rows, err := r.DB.Query(ctx, query)
+	rows, err := r.db.Query(ctx, query)
 	if err != nil {
 		return nil, err
 	}
