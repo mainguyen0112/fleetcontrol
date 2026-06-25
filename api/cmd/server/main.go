@@ -41,6 +41,8 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(auth.Middleware(cfg.JWTSecret))
 		r.Post("/satellites", satHandler.Create)
+		r.Get("/satellites", satHandler.List)
+		r.Get("/satellites/{id}", satHandler.GetByID)
 	})
 
 	log.Info("server listening", zap.String("port", cfg.Port))
