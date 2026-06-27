@@ -43,6 +43,8 @@ func main() {
 		r.Post("/satellites", satHandler.Create)
 		r.Get("/satellites", satHandler.List)
 		r.Get("/satellites/{id}", satHandler.GetByID)
+		r.Patch("/satellites/{id}", satHandler.Update)
+		r.Delete("/satellites/{id}", satHandler.Delete)
 	})
 
 	log.Info("server listening", zap.String("port", cfg.Port))

@@ -84,3 +84,51 @@ func (h *Handler) GetByID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(sat)
 }
+
+type updateRequest struct {
+	Region string `json:"region"`
+}
+
+func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_ID", "invalid satellite id")
+		return
+	}
+
+	var req updateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
+		return
+	}
+
+	updated, err := h.service.Update(r.Context(), id, req.Region)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "UPDATE_FAILED", err.Error())
+		return
+	}
+	if updated == nil {
+		writeError(w, http.StatusNotFound, "NOT_FOUND", "satellite not found")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(updated)
+}
+
+func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_ID", "invalid satellite id")
+		return
+	}
+
+	if err := h.service.Delete(r.Context(), id); err != nil {
+		writeError(w, http.StatusInternalServerError, "DELETE_FAILED", err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

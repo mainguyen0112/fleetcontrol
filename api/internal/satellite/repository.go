@@ -12,6 +12,8 @@ type Repository interface {
 	Create(ctx context.Context, s *Satellite) (*Satellite, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*Satellite, error)
 	List(ctx context.Context) ([]*Satellite, error)
+	Update(ctx context.Context, id uuid.UUID, region string) (*Satellite, error)
+	Delete(ctx context.Context, id uuid.UUID) error
 }
 
 type PostgresRepository struct {
@@ -76,4 +78,29 @@ func (r *PostgresRepository) List(ctx context.Context) ([]*Satellite, error) {
 		result = append(result, &s)
 	}
 	return result, rows.Err()
+}
+
+func (r *PostgresRepository) Update(ctx context.Context, id uuid.UUID, region string) (*Satellite, error) {
+	query := `
+		UPDATE satellites SET region = $1
+		WHERE id = $2
+		RETURNING id, name, region, status, managed_by, last_seen_at, created_at
+	`
+	var out Satellite
+	err := r.db.QueryRow(ctx, query, region, id).Scan(
+		&out.ID, &out.Name, &out.Region, &out.Status, &out.ManagedBy, &out.LastSeenAt, &out.CreatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (r *PostgresRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	query := `DELETE FROM satellites WHERE id = $1`
+	_, err := r.db.Exec(ctx, query, id)
+	return err
 }

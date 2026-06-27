@@ -27,3 +27,11 @@ func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (*Satellite, error)
 func (s *Service) List(ctx context.Context) ([]*Satellite, error) {
 	return s.repo.List(ctx)
 }
+
+func (s *Service) Update(ctx context.Context, id uuid.UUID, region string) (*Satellite, error) {
+	return s.repo.Update(ctx, id, region)
+}
+
+func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
+	return s.repo.Delete(ctx, id)
+}
