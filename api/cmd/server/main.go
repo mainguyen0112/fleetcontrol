@@ -11,6 +11,7 @@ import (
 	"github.com/mainguyen0112/fleetcontrol/api/internal/config"
 	"github.com/mainguyen0112/fleetcontrol/api/internal/db"
 	"github.com/mainguyen0112/fleetcontrol/api/internal/satellite"
+	"github.com/mainguyen0112/fleetcontrol/api/internal/user"
 	"github.com/mainguyen0112/fleetcontrol/api/pkg/logger"
 )
 
@@ -35,11 +36,17 @@ func main() {
 	satService := satellite.NewService(satRepo)
 	satHandler := satellite.NewHandler(satService)
 
+	userRepo := user.NewPostgresRepository(pool)
+	userService := user.NewService(userRepo)
+	userHandler := user.NewHandler(userService)
+
 	r := chi.NewRouter()
 	r.Post("/auth/login", authHandler.Login)
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth.Middleware(cfg.JWTSecret))
+		r.Use(auth.RequireRole("admin"))
+		r.Post("/users", userHandler.Create)
 		r.Post("/satellites", satHandler.Create)
 		r.Get("/satellites", satHandler.List)
 		r.Get("/satellites/{id}", satHandler.GetByID)
