@@ -45,6 +45,7 @@ func main() {
 		r.Get("/satellites/{id}", satHandler.GetByID)
 		r.Patch("/satellites/{id}", satHandler.Update)
 		r.Delete("/satellites/{id}", satHandler.Delete)
+		r.Post("/satellites/{id}/heartbeat", satHandler.Heartbeat)
 	})
 
 	log.Info("server listening", zap.String("port", cfg.Port))

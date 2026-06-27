@@ -14,6 +14,7 @@ type Repository interface {
 	List(ctx context.Context) ([]*Satellite, error)
 	Update(ctx context.Context, id uuid.UUID, region string) (*Satellite, error)
 	Delete(ctx context.Context, id uuid.UUID) error
+	UpdateHeartbeat(ctx context.Context, id uuid.UUID) (*Satellite, error)
 }
 
 type PostgresRepository struct {
@@ -103,4 +104,24 @@ func (r *PostgresRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	query := `DELETE FROM satellites WHERE id = $1`
 	_, err := r.db.Exec(ctx, query, id)
 	return err
+}
+
+func (r *PostgresRepository) UpdateHeartbeat(ctx context.Context, id uuid.UUID) (*Satellite, error) {
+	query := `
+		UPDATE satellites
+		SET status = 'Ready', last_seen_at = NOW()
+		WHERE id = $1
+		RETURNING id, name, region, status, managed_by, last_seen_at, created_at
+	`
+	var out Satellite
+	err := r.db.QueryRow(ctx, query, id).Scan(
+		&out.ID, &out.Name, &out.Region, &out.Status, &out.ManagedBy, &out.LastSeenAt, &out.CreatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &out, nil
 }
