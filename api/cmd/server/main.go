@@ -47,6 +47,8 @@ func main() {
 		r.Use(auth.Middleware(cfg.JWTSecret))
 		r.Use(auth.RequireRole("admin"))
 		r.Post("/users", userHandler.Create)
+		r.Get("/users", userHandler.List)
+		r.Delete("/users/{id}", userHandler.Delete)
 		r.Post("/satellites", satHandler.Create)
 		r.Get("/satellites", satHandler.List)
 		r.Get("/satellites/{id}", satHandler.GetByID)

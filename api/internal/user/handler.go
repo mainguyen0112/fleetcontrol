@@ -3,6 +3,9 @@ package user
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 type Handler struct {
@@ -47,4 +50,31 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"error": map[string]string{"code": code, "message": message},
 	})
+}
+
+func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
+	users, err := h.service.List(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "LIST_FAILED", err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(users)
+}
+
+func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_ID", "invalid user id")
+		return
+	}
+
+	if err := h.service.Delete(r.Context(), id); err != nil {
+		writeError(w, http.StatusInternalServerError, "DELETE_FAILED", err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
