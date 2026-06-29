@@ -10,6 +10,7 @@ import (
 	"github.com/mainguyen0112/fleetcontrol/api/internal/auth"
 	"github.com/mainguyen0112/fleetcontrol/api/internal/config"
 	"github.com/mainguyen0112/fleetcontrol/api/internal/db"
+	"github.com/mainguyen0112/fleetcontrol/api/internal/health"
 	"github.com/mainguyen0112/fleetcontrol/api/internal/satellite"
 	"github.com/mainguyen0112/fleetcontrol/api/internal/user"
 	"github.com/mainguyen0112/fleetcontrol/api/pkg/logger"
@@ -40,8 +41,13 @@ func main() {
 	userService := user.NewService(userRepo)
 	userHandler := user.NewHandler(userService)
 
+	healthHandler := &health.Handler{DB: pool}
+
 	r := chi.NewRouter()
 	r.Post("/auth/login", authHandler.Login)
+
+	r.Get("/health", healthHandler.Health)
+	r.Get("/version", healthHandler.Version)
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth.Middleware(cfg.JWTSecret))
