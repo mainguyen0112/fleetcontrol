@@ -45,16 +45,20 @@ func main() {
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth.Middleware(cfg.JWTSecret))
-		r.Use(auth.RequireRole("admin"))
-		r.Post("/users", userHandler.Create)
-		r.Get("/users", userHandler.List)
-		r.Delete("/users/{id}", userHandler.Delete)
 		r.Post("/satellites", satHandler.Create)
 		r.Get("/satellites", satHandler.List)
 		r.Get("/satellites/{id}", satHandler.GetByID)
 		r.Patch("/satellites/{id}", satHandler.Update)
 		r.Delete("/satellites/{id}", satHandler.Delete)
 		r.Post("/satellites/{id}/heartbeat", satHandler.Heartbeat)
+	})
+
+	r.Group(func(r chi.Router) {
+		r.Use(auth.Middleware(cfg.JWTSecret))
+		r.Use(auth.RequireRole("admin"))
+		r.Post("/users", userHandler.Create)
+		r.Get("/users", userHandler.List)
+		r.Delete("/users/{id}", userHandler.Delete)
 	})
 
 	log.Info("server listening", zap.String("port", cfg.Port))
