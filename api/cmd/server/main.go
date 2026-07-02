@@ -44,6 +44,7 @@ func main() {
 	healthHandler := &health.Handler{DB: pool}
 
 	r := chi.NewRouter()
+	r.Use(logger.RequestLogger(log))
 	r.Post("/auth/login", authHandler.Login)
 
 	r.Get("/health", healthHandler.Health)
