@@ -1,5 +1,0 @@
-package: gen
-generate:
-  models: true
-  chi-server: false    # chỉ generate models trước, không generate server interface
-output: gen/models.gen.go
