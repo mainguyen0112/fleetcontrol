@@ -7,6 +7,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"github.com/mainguyen0112/fleetcontrol/api/gen"
 )
 
 type Handler struct {
@@ -17,32 +19,10 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-type createRequest struct {
-	Name   string `json:"name"`
-	Region string `json:"region"`
-}
-
-func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
-	var req createRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
-		return
-	}
-
-	sat := &Satellite{
-		Name:   req.Name,
-		Region: req.Region,
-	}
-
-	created, err := h.service.Create(r.Context(), sat)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "CREATE_FAILED", err.Error())
-		return
-	}
-
+func writeJSON(w http.ResponseWriter, status int, body interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(created)
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(body)
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
@@ -53,6 +33,22 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	})
 }
 
+func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	var req gen.CreateSatelliteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
+		return
+	}
+
+	created, err := h.service.Create(r.Context(), ToDomainCreate(req))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "CREATE_FAILED", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, ToResponse(created))
+}
+
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	sats, err := h.service.List(r.Context())
 	if err != nil {
@@ -60,8 +56,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(sats)
+	writeJSON(w, http.StatusOK, ToResponseList(sats))
 }
 
 func (h *Handler) GetByID(w http.ResponseWriter, r *http.Request) {
@@ -82,12 +77,7 @@ func (h *Handler) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(sat)
-}
-
-type updateRequest struct {
-	Region string `json:"region"`
+	writeJSON(w, http.StatusOK, ToResponse(sat))
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
@@ -98,7 +88,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req updateRequest
+	var req gen.UpdateSatelliteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
 		return
@@ -120,8 +110,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(updated)
+	writeJSON(w, http.StatusOK, ToResponse(updated))
 }
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -164,6 +153,5 @@ func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(updated)
+	writeJSON(w, http.StatusOK, ToResponse(updated))
 }

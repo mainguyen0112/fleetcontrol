@@ -9,8 +9,8 @@ import (
 // Business fields (ID, Status, ManagedBy, CreatedAt, LastSeenAt)
 // are intentionally left zero-valued.
 // Service.Create is responsible for initializing them.
-func ToDomainCreate(req gen.CreateSatelliteRequest) Satellite {
-	return Satellite{
+func ToDomainCreate(req gen.CreateSatelliteRequest) *Satellite {
+	return &Satellite{
 		Name:   req.Name,
 		Region: req.Region,
 	}
