@@ -2,10 +2,13 @@ package user
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"github.com/mainguyen0112/fleetcontrol/api/gen"
 )
 
 type Handler struct {
@@ -16,32 +19,10 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
 }
 
-type createRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Role     string `json:"role"`
-}
-
-func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
-	var req createRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
-		return
-	}
-
-	if req.Role == "" {
-		req.Role = "viewer"
-	}
-
-	created, err := h.service.Create(r.Context(), req.Username, req.Password, req.Role)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "CREATE_FAILED", err.Error())
-		return
-	}
-
+func writeJSON(w http.ResponseWriter, status int, body interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(created)
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(body)
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
@@ -52,6 +33,28 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 	})
 }
 
+func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	var req gen.CreateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_BODY", "invalid request body")
+		return
+	}
+
+	username, password, role := CreateParamsFromRequest(req)
+
+	created, err := h.service.Create(r.Context(), username, password, role)
+	if err != nil {
+		if errors.Is(err, ErrInvalidRole) {
+			writeError(w, http.StatusBadRequest, "INVALID_ROLE", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "CREATE_FAILED", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, ToResponse(created))
+}
+
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	users, err := h.service.List(r.Context())
 	if err != nil {
@@ -59,8 +62,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(users)
+	writeJSON(w, http.StatusOK, ToResponseList(users))
 }
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {

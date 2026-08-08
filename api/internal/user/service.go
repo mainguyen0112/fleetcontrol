@@ -2,10 +2,13 @@ package user
 
 import (
 	"context"
+	"errors"
 
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
+
+var ErrInvalidRole = errors.New("role must be one of: admin, viewer")
 
 type Service struct {
 	repo Repository
@@ -16,6 +19,10 @@ func NewService(repo Repository) *Service {
 }
 
 func (s *Service) Create(ctx context.Context, username, password, role string) (*User, error) {
+	if role != "admin" && role != "viewer" {
+		return nil, ErrInvalidRole
+	}
+
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
