@@ -6,7 +6,7 @@
 
 **Status:** 🚧 Active development — **Phase 3 of 10**
 
-Phase 2 is complete: the Control Plane API includes JWT authentication, RBAC, CRUD APIs, heartbeat reporting, health endpoints, structured logging, and integration tests. Phase 3 (OpenAPI-first contract) is in progress: the API now generates its request/response models, server interface, and client from a single `openapi.yaml` spec, with domain logic kept intentionally decoupled from generated types.
+Phase 3 (OpenAPI-first contract) is complete: request/response models, server interface, and client are generated from a single `openapi.yaml` spec; domain logic stays fully decoupled from generated types via explicit mappers; the full pipeline is verified end-to-end through integration tests using the generated client.
 
 ---
 
@@ -324,15 +324,15 @@ The CLI, Agent, Swagger UI, and GitOps integration are still under development.
   - Health endpoint
   - Structured logging
   - Integration tests
-- 🚧 **Phase 3** — OpenAPI-first contract
+- ✅ **Phase 3** — OpenAPI-first contract
   - ✅ `openapi.yaml` written (Satellite, User, Auth, Health, Version)
   - ✅ Codegen infrastructure: `go tool oapi-codegen` (Go 1.26 native `tool` directive), single `Makefile`, generated code committed + verified in CI
   - ✅ Models, server interface, and client generated
   - ✅ Handler layer refactored to use generated request/response types; Service and Repository remain on hand-written domain models
   - ✅ `mapper.go` per domain (`satellite`, `user`) with unit tests, including a documented no-leak guarantee for password hashes
   - ✅ Router implements `gen.ServerInterface` via a thin `Server` adapter and `ServerInterfaceWrapper`
-  - ⏳ Swagger UI at `/docs`
-  - ⏳ Integration tests validating the full `OpenAPI → Generated Code → Handler → Service → Repository` path
+  - ✅ Swagger UI at `/docs`
+  - ✅ Integration tests validate the full `OpenAPI → Generated Client → ServerInterface → Handler → Service → Repository` path
 - ⏳ **Phase 4** — fleetctl CLI (using the generated client)
 - ⏳ **Phase 5** — Declarative Apply Engine
 - ⏳ **Phase 6** — Full Operator lifecycle
