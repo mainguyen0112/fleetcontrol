@@ -15,6 +15,7 @@ import (
 	"github.com/mainguyen0112/fleetcontrol/api/internal/user"
 	"github.com/mainguyen0112/fleetcontrol/api/pkg/logger"
 	"github.com/mainguyen0112/fleetcontrol/api/gen"
+	"github.com/mainguyen0112/fleetcontrol/api/internal/docs"
 )
 
 func main() {
@@ -43,6 +44,7 @@ func main() {
 	userHandler := user.NewHandler(userService)
 
 	healthHandler := &health.Handler{DB: pool}
+	docsHandler := docs.NewHandler()
 
 	server := NewServer(satHandler, userHandler, authHandler, healthHandler)
 	wrapper := &gen.ServerInterfaceWrapper{Handler: server}
@@ -53,6 +55,8 @@ func main() {
 	r.Post("/auth/login", wrapper.PostAuthLogin)
 	r.Get("/health", wrapper.GetHealth)
 	r.Get("/version", wrapper.GetVersion)
+	r.Get("/openapi.yaml", docsHandler.ServeSpec)
+	r.Get("/docs", docsHandler.ServeUI)
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth.Middleware(cfg.JWTSecret))
