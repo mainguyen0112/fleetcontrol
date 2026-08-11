@@ -6,7 +6,7 @@
 
 **Status:** 🚧 Active development — **Phase 3 of 10**
 
-Phase 2 is complete: the Control Plane API now includes JWT authentication, RBAC, CRUD APIs, heartbeat reporting, health endpoints, structured logging, and integration tests.
+Phase 2 is complete: the Control Plane API includes JWT authentication, RBAC, CRUD APIs, heartbeat reporting, health endpoints, structured logging, and integration tests. Phase 3 (OpenAPI-first contract) is in progress: the API now generates its request/response models, server interface, and client from a single `openapi.yaml` spec, with domain logic kept intentionally decoupled from generated types.
 
 ---
 
@@ -46,7 +46,10 @@ That is what makes FleetControl an infrastructure platform instead of a CRUD app
 - ✅ Health & Version endpoints
 - ✅ Structured JSON logging (Zap)
 - ✅ Integration tests covering authentication and CRUD flow
-- ⏳ OpenAPI-first contract generation
+- ✅ OpenAPI-first contract: spec-driven models, server interface, and client generation
+- ✅ Domain/API boundary enforced via explicit mappers (generated types never leak into Service/Repository)
+- ✅ Router implements the generated `ServerInterface`, wired through `ServerInterfaceWrapper`
+- ⏳ Swagger UI (`/docs`)
 - ⏳ `fleetctl` CLI
 - ⏳ Declarative Apply Engine
 - ⏳ Real Satellite Agent
@@ -69,11 +72,13 @@ That is what makes FleetControl an infrastructure platform instead of a CRUD app
                            ▼
               Fleet Operator (Reconciliation)
                            │
+                    Generated Client
+                           │
                            ▼
                  Control Plane REST API
                            ▲
                            │
-        fleetctl (Development / Debugging Only)
+   fleetctl (Development / Debugging Only, via Generated Client)
                            │
                            ▼
                      PostgreSQL Database
@@ -97,6 +102,8 @@ FleetControl intentionally separates declarative and imperative workflows.
 
 Making this ownership decision before implementation greatly simplifies later development.
 
+A parallel decision was made in Phase 3: **OpenAPI is the source of truth for the API contract only, not for domain logic.** Generated types (`gen.*`) are confined to the HTTP boundary; Service and Repository layers depend exclusively on hand-written domain models. See [Design Principles](#design-principles) below.
+
 ---
 
 # Design Principles
@@ -109,19 +116,19 @@ FleetControl intentionally follows several engineering principles.
 HTTP Request
     │
     ▼
-Router
+Router (gen.ServerInterface, via ServerInterfaceWrapper)
     │
     ▼
 Middleware
     │
     ▼
-Handler
+Handler (generated request/response types)
+    │
+    ▼ mapper.go (explicit conversion)
+Service (domain models only)
     │
     ▼
-Service
-    │
-    ▼
-Repository
+Repository (domain models only)
     │
     ▼
 PostgreSQL
@@ -131,12 +138,27 @@ Each layer has exactly one responsibility.
 
 | Layer | Responsibility |
 |--------|----------------|
-| Router | Route incoming requests |
+| Router | Implements the OpenAPI-generated `ServerInterface`; routes incoming requests |
 | Middleware | Authentication, authorization, logging |
-| Handler | HTTP parsing and response generation |
-| Service | Business logic |
-| Repository | Database access |
+| Handler | HTTP parsing, generated request/response types, calls mapper + service |
+| Mapper | Explicit, hand-written conversion between generated API types and domain models |
+| Service | Business logic, operates on domain models only |
+| Repository | Database access, operates on domain models only |
 | PostgreSQL | Data persistence |
+
+---
+
+### Contract-First, Domain-Second
+
+Since Phase 3, the API contract (`api/openapi/openapi.yaml`) is the single source of truth for HTTP request/response shapes. Running `make generate` produces:
+
+- `gen/models.gen.go` — request/response types
+- `gen/server.gen.go` — `ServerInterface` + `ServerInterfaceWrapper`
+- `gen/client.gen.go` — a typed Go client, to be reused by `fleetctl` and the Operator
+
+Generated code is committed to the repository (not gitignored) and verified in CI via `make verify-generate`, so a fresh clone builds immediately without requiring a manual generation step — the same pattern already used for `operator/api/v1alpha1/zz_generated.deepcopy.go`.
+
+Crucially, generated types stop at the Handler layer. Domain models (`internal/*/model.go`) remain hand-written, pointer-free where it matters, and free of any dependency on the `gen` package. Each domain package exposes a `mapper.go` with explicit `ToDomain*` / `ToResponse*` functions — no reflection-based or generic mapping — so a change to the OpenAPI spec cannot silently ripple into business logic, and a change to business logic cannot silently break the API contract.
 
 ---
 
@@ -148,7 +170,8 @@ Objects are created in `main.go` using constructor injection.
 main
  ├── Repository
  ├── Service(Repository)
- └── Handler(Service)
+ ├── Handler(Service)
+ └── Server(Handler...)   — implements gen.ServerInterface
 ```
 
 Business logic depends on interfaces instead of concrete implementations, making the code easier to test and extend.
@@ -160,21 +183,18 @@ Business logic depends on interfaces instead of concrete implementations, making
 FleetControl deliberately separates:
 
 - HTTP handling
+- API contract (generated types)
 - Business rules
 - Database access
 - Infrastructure
 
-No SQL appears inside handlers.
-
-No HTTP details appear inside repositories.
-
-Business rules stay inside the Service layer.
+No SQL appears inside handlers. No HTTP details appear inside repositories. No generated types appear inside services or repositories. Business rules stay inside the Service layer.
 
 ---
 
 ### GitOps First
 
-The project treats Git as the source of truth.
+The project treats Git as the source of truth for production fleet state.
 
 Instead of issuing imperative commands against production systems, desired state is declared in Git and continuously reconciled by the Kubernetes Operator.
 
@@ -192,9 +212,9 @@ The server stores no session state, allowing multiple API instances to be deploy
 
 | Component | Description | Status |
 |-----------|-------------|--------|
-| `api/` | Control Plane REST API | ✅ Phase 2 Complete |
+| `api/` | Control Plane REST API | 🚧 Phase 3 In Progress |
 | `operator/` | Kubernetes Operator | ✅ Phase 1 Complete |
-| `agent/` | Edge Heartbeat Agent | ⏳ Phase 6.5 |
+| `agent/` | Edge Heartbeat Agent | ⏳ Phase 7.5 |
 | `fleetctl/` | CLI Tool | ⏳ Phase 4 |
 | PostgreSQL | Metadata Storage | ✅ |
 
@@ -213,7 +233,7 @@ The server stores no session state, allowing multiple API instances to be deploy
 | **Zap** | High-performance structured JSON logging designed for production services and centralized log aggregation. |
 | **Docker Compose** | Simple reproducible local development environment for API and PostgreSQL. |
 | **Kubebuilder + controller-runtime** | Standard toolkit for building Kubernetes Operators using reconciliation patterns. |
-| **OpenAPI + oapi-codegen** *(Phase 3)* | Contract-first API development with generated server/client types to eliminate documentation drift. |
+| **OpenAPI + oapi-codegen** | Contract-first API development. `openapi.yaml` is the single source of truth for models, server interface, and client, generated via Go 1.26's native `tool` directive (no separate config file — a single `Makefile` drives all three generation targets). |
 | **ArgoCD** *(Planned)* | Implements GitOps by continuously reconciling Git with the Kubernetes cluster. |
 
 ---
@@ -222,7 +242,21 @@ The server stores no session state, allowing multiple API instances to be deploy
 
 ```text
 fleetcontrol/
-├── api/              # Control Plane REST API
+├── api/
+│   ├── openapi/
+│   │   └── openapi.yaml   # single source of truth for the API contract
+│   ├── gen/                # generated models, server interface, client (committed)
+│   ├── internal/
+│   │   └── <domain>/
+│   │       ├── model.go     # domain model (hand-written, no gen.* dependency)
+│   │       ├── mapper.go    # explicit gen.* ↔ domain conversion
+│   │       ├── handler.go   # HTTP boundary, uses gen.* types
+│   │       ├── service.go   # business logic, domain models only
+│   │       └── repository.go
+│   ├── cmd/server/
+│   │   ├── main.go
+│   │   └── server.go        # adapter implementing gen.ServerInterface
+│   └── Makefile              # make generate / make verify-generate
 ├── operator/         # Kubernetes Operator
 ├── agent/            # Edge Agent (upcoming)
 ├── fleetctl/         # CLI (upcoming)
@@ -241,7 +275,7 @@ fleetcontrol/
 
 1. A Platform Engineer commits a new `Satellite` resource into Git.
 2. ArgoCD synchronizes the resource into the Kubernetes cluster.
-3. The Fleet Operator reconciles the CRD against the Control Plane API.
+3. The Fleet Operator reconciles the CRD against the Control Plane API, via the OpenAPI-generated client.
 4. The Satellite is created with `managed_by = operator`.
 5. A real Satellite Agent registers itself and begins sending heartbeat requests.
 6. If the Agent stops reporting, the Control Plane automatically marks it as `Unreachable`.
@@ -255,15 +289,18 @@ fleetcontrol/
 # Start PostgreSQL
 docker compose up -d postgres
 
-# Start API
+# Generate API code from the OpenAPI spec (models, server interface, client)
 cd api
+make generate
+
+# Start API
 go run cmd/server/main.go
 
 # Start local Kubernetes cluster
 kind create cluster
 
 # Install CRD
-cd operator
+cd ../operator
 make manifests
 make install
 
@@ -271,7 +308,7 @@ make install
 make run
 ```
 
-The CLI, Agent, and GitOps integration are still under development.
+The CLI, Agent, Swagger UI, and GitOps integration are still under development.
 
 ---
 
@@ -287,12 +324,20 @@ The CLI, Agent, and GitOps integration are still under development.
   - Health endpoint
   - Structured logging
   - Integration tests
-- ⏳ **Phase 3** — OpenAPI-first contract
-- ⏳ **Phase 4** — fleetctl CLI
+- 🚧 **Phase 3** — OpenAPI-first contract
+  - ✅ `openapi.yaml` written (Satellite, User, Auth, Health, Version)
+  - ✅ Codegen infrastructure: `go tool oapi-codegen` (Go 1.26 native `tool` directive), single `Makefile`, generated code committed + verified in CI
+  - ✅ Models, server interface, and client generated
+  - ✅ Handler layer refactored to use generated request/response types; Service and Repository remain on hand-written domain models
+  - ✅ `mapper.go` per domain (`satellite`, `user`) with unit tests, including a documented no-leak guarantee for password hashes
+  - ✅ Router implements `gen.ServerInterface` via a thin `Server` adapter and `ServerInterfaceWrapper`
+  - ⏳ Swagger UI at `/docs`
+  - ⏳ Integration tests validating the full `OpenAPI → Generated Code → Handler → Service → Repository` path
+- ⏳ **Phase 4** — fleetctl CLI (using the generated client)
 - ⏳ **Phase 5** — Declarative Apply Engine
 - ⏳ **Phase 6** — Full Operator lifecycle
-- ⏳ **Phase 6.5** — Real Satellite Agent
-- ⏳ **Phase 7** — Operator ↔ API integration
+- ⏳ **Phase 7** — Fleet Control Plane Integration
+- ⏳ **Phase 7.5** — Real Satellite Agent
 - ⏳ **Phase 8** — GitOps with ArgoCD
 - ⏳ **Phase 9** — Observability
 - ⏳ **Phase 10** — Productionization
@@ -307,17 +352,25 @@ The CLI, Agent, and GitOps integration are still under development.
 - Constructor-based Dependency Injection keeps dependencies explicit and greatly improves testability.
 - Depending on interfaces instead of concrete implementations follows the Dependency Inversion Principle and enables mocking during testing.
 
+## Contract-First API Development
+
+- OpenAPI should be the source of truth for the **API contract**, not for **domain logic**. Letting generated types leak into Service/Repository layers couples business logic to HTTP concerns and makes every API change ripple through the whole codebase.
+- Generated request/response types are naturally all-pointer (since nothing in the spec is marked `required`), which is appropriate for wire formats but poor for domain modeling — pointer-heavy domain structs invite nil-dereference bugs and obscure business invariants.
+- A single `Makefile` with per-target CLI flags is more maintainable than multiple near-identical `codegen.yaml` config files: one file means one place to update, and configuration drift between targets becomes structurally impossible rather than merely avoided by discipline.
+- Committing generated code (rather than gitignoring it) and verifying it in CI (`make generate && git diff --exit-code`) means a fresh clone builds immediately, and any spec/code mismatch fails CI loudly instead of causing silent drift.
+
 ## Authentication & Authorization
 
 - Authentication (JWT) and authorization (RBAC) solve different problems and should remain separate.
 - Stateless JWT authentication enables horizontal scaling without server-side session storage.
 - Passwords should never be stored directly; bcrypt provides adaptive hashing that significantly increases resistance to brute-force attacks.
+- Explicit, hand-written mapping between domain and API models (rather than reflection or struct-tag-based mapping) is worth the verbosity for security-sensitive objects like `User` — it makes it structurally obvious that a field such as `PasswordHash` never has a path to the JSON response.
 
 ## Business Logic
 
 - Business rules belong in the Service layer, not in SQL queries or HTTP handlers.
 - Rules such as `managed_by = operator` prevent configuration drift between GitOps-managed resources and manual API operations.
-- Default values (`Pending`, `manual`) are business decisions rather than database concerns.
+- Default values (`Pending`, `manual`, `viewer`) are business decisions rather than database concerns — and defaulting logic during request-to-domain conversion is not "pure" mapping, so it deserves its own comment explaining the boundary it crosses.
 
 ## Persistence
 
