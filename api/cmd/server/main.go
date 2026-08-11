@@ -14,6 +14,7 @@ import (
 	"github.com/mainguyen0112/fleetcontrol/api/internal/satellite"
 	"github.com/mainguyen0112/fleetcontrol/api/internal/user"
 	"github.com/mainguyen0112/fleetcontrol/api/pkg/logger"
+	"github.com/mainguyen0112/fleetcontrol/api/gen"
 )
 
 func main() {
@@ -43,29 +44,32 @@ func main() {
 
 	healthHandler := &health.Handler{DB: pool}
 
+	server := NewServer(satHandler, userHandler, authHandler, healthHandler)
+	wrapper := &gen.ServerInterfaceWrapper{Handler: server}
+
 	r := chi.NewRouter()
 	r.Use(logger.RequestLogger(log))
-	r.Post("/auth/login", authHandler.Login)
 
-	r.Get("/health", healthHandler.Health)
-	r.Get("/version", healthHandler.Version)
+	r.Post("/auth/login", wrapper.PostAuthLogin)
+	r.Get("/health", wrapper.GetHealth)
+	r.Get("/version", wrapper.GetVersion)
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth.Middleware(cfg.JWTSecret))
-		r.Post("/satellites", satHandler.Create)
-		r.Get("/satellites", satHandler.List)
-		r.Get("/satellites/{id}", satHandler.GetByID)
-		r.Patch("/satellites/{id}", satHandler.Update)
-		r.Delete("/satellites/{id}", satHandler.Delete)
-		r.Post("/satellites/{id}/heartbeat", satHandler.Heartbeat)
+		r.Post("/satellites", wrapper.PostSatellites)
+		r.Get("/satellites", wrapper.GetSatellites)
+		r.Get("/satellites/{id}", wrapper.GetSatellitesId)
+		r.Patch("/satellites/{id}", wrapper.PatchSatellitesId)
+		r.Delete("/satellites/{id}", wrapper.DeleteSatellitesId)
+		r.Post("/satellites/{id}/heartbeat", wrapper.PostSatellitesIdHeartbeat)
 	})
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth.Middleware(cfg.JWTSecret))
 		r.Use(auth.RequireRole("admin"))
-		r.Post("/users", userHandler.Create)
-		r.Get("/users", userHandler.List)
-		r.Delete("/users/{id}", userHandler.Delete)
+		r.Post("/users", wrapper.PostUsers)
+		r.Get("/users", wrapper.GetUsers)
+		r.Delete("/users/{id}", wrapper.DeleteUsersId)
 	})
 
 	log.Info("server listening", zap.String("port", cfg.Port))
