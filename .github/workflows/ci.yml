@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  api-and-cli:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fleetcontrol
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d fleetcontrol"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DB_URL: postgres://postgres:postgres@localhost:5432/fleetcontrol?sslmode=disable
+      JWT_SECRET: ci-secret
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: api/go.mod
+          cache: true
+          cache-dependency-path: |
+            api/go.sum
+            fleetctl/go.sum
+
+      - name: Apply database migrations
+        run: |
+          psql -h localhost -U postgres -d fleetcontrol -f api/internal/db/migrations/000001_create_satellites.up.sql
+          psql -h localhost -U postgres -d fleetcontrol -f api/internal/db/migrations/000002_create_users.up.sql
+          psql -h localhost -U postgres -d fleetcontrol -c "INSERT INTO users (username, password_hash, role) VALUES ('admin', crypt('admin123', gen_salt('bf')), 'admin');"
+
+      - name: Verify generated OpenAPI code
+        working-directory: api
+        run: make verify-generate
+
+      - name: Test API
+        run: go test ./api/...
+
+      - name: Test fleetctl
+        run: go test ./fleetctl/...
+
+  operator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: operator/go.mod
+          cache: true
+          cache-dependency-path: operator/go.sum
+      - name: Test Operator
+        working-directory: operator
+        run: make test

@@ -4,9 +4,9 @@
 
 [Architecture](docs/architecture.md) · [API Design](docs/api-design.md) · [CRD Design](docs/crd-design.md)
 
-**Status:** 🚧 Active development — **Phase 3 of 10**
+**Status:** 🚧 Active development — **Phase 4 of 10 (CLI MVP in progress)**
 
-Phase 3 (OpenAPI-first contract) is complete: request/response models, server interface, and client are generated from a single `openapi.yaml` spec; domain logic stays fully decoupled from generated types via explicit mappers; the full pipeline is verified end-to-end through integration tests using the generated client.
+Phase 3 (OpenAPI-first contract) is complete: production and integration tests share the same server adapter and router, generated-code drift is checked in CI, and domain logic stays decoupled from generated types through explicit mappers. Phase 4 now provides the first functional development CLI commands.
 
 ---
 
@@ -49,8 +49,8 @@ That is what makes FleetControl an infrastructure platform instead of a CRUD app
 - ✅ OpenAPI-first contract: spec-driven models, server interface, and client generation
 - ✅ Domain/API boundary enforced via explicit mappers (generated types never leak into Service/Repository)
 - ✅ Router implements the generated `ServerInterface`, wired through `ServerInterfaceWrapper`
-- ⏳ Swagger UI (`/docs`)
-- ⏳ `fleetctl` CLI
+- ✅ Swagger UI (`/docs`)
+- 🚧 `fleetctl` CLI MVP (`login`, `health`, Satellite CRUD subset, and User commands)
 - ⏳ Declarative Apply Engine
 - ⏳ Real Satellite Agent
 - ⏳ Full GitOps integration
@@ -58,7 +58,9 @@ That is what makes FleetControl an infrastructure platform instead of a CRUD app
 
 ---
 
-# Architecture
+# Target Architecture
+
+The diagram below describes the intended end state. Today, the Control Plane API and Operator prototype exist, while the real Agent, Operator-to-API reconciliation, and end-to-end GitOps flow are still planned.
 
 ```text
                Developer / Platform Engineer
@@ -156,7 +158,7 @@ Since Phase 3, the API contract (`api/openapi/openapi.yaml`) is the single sourc
 - `gen/server.gen.go` — `ServerInterface` + `ServerInterfaceWrapper`
 - `gen/client.gen.go` — a typed Go client, to be reused by `fleetctl` and the Operator
 
-Generated code is committed to the repository (not gitignored) and verified in CI via `make verify-generate`, so a fresh clone builds immediately without requiring a manual generation step — the same pattern already used for `operator/api/v1alpha1/zz_generated.deepcopy.go`.
+Generated code is committed to the repository (not gitignored), so a fresh clone builds immediately without requiring a manual generation step. Contributors can verify that generated files match the specification locally with `make verify-generate`, and CI runs the same drift check on every push and pull request.
 
 Crucially, generated types stop at the Handler layer. Domain models (`internal/*/model.go`) remain hand-written, pointer-free where it matters, and free of any dependency on the `gen` package. Each domain package exposes a `mapper.go` with explicit `ToDomain*` / `ToResponse*` functions — no reflection-based or generic mapping — so a change to the OpenAPI spec cannot silently ripple into business logic, and a change to business logic cannot silently break the API contract.
 
@@ -212,10 +214,10 @@ The server stores no session state, allowing multiple API instances to be deploy
 
 | Component | Description | Status |
 |-----------|-------------|--------|
-| `api/` | Control Plane REST API | 🚧 Phase 3 In Progress |
+| `api/` | Control Plane REST API | ✅ Phase 3 implementation complete |
 | `operator/` | Kubernetes Operator | ✅ Phase 1 Complete |
 | `agent/` | Edge Heartbeat Agent | ⏳ Phase 7.5 |
-| `fleetctl/` | CLI Tool | ⏳ Phase 4 |
+| `fleetctl/` | CLI Tool | 🚧 Phase 4 MVP in progress |
 | PostgreSQL | Metadata Storage | ✅ |
 
 ---
@@ -259,7 +261,7 @@ fleetcontrol/
 │   └── Makefile              # make generate / make verify-generate
 ├── operator/         # Kubernetes Operator
 ├── agent/            # Edge Agent (upcoming)
-├── fleetctl/         # CLI (upcoming)
+├── fleetctl/         # Development CLI (config, auth, health, Satellite and User commands)
 ├── deploy/           # Helm & ArgoCD manifests
 ├── observability/    # Prometheus & Grafana
 ├── docs/
@@ -308,7 +310,12 @@ make install
 make run
 ```
 
-The CLI, Agent, Swagger UI, and GitOps integration are still under development.
+The CLI is for development and debugging only. The Agent and GitOps integration are still under development. Swagger UI is available at `/docs` when the API is running.
+
+## Test prerequisites
+
+- API integration tests require a reachable PostgreSQL database with the project migrations applied and the development admin user seeded.
+- Operator controller tests require Kubernetes `envtest` binaries; `make test` in `operator/` installs them through the existing setup target.
 
 ---
 
@@ -326,14 +333,19 @@ The CLI, Agent, Swagger UI, and GitOps integration are still under development.
   - Integration tests
 - ✅ **Phase 3** — OpenAPI-first contract
   - ✅ `openapi.yaml` written (Satellite, User, Auth, Health, Version)
-  - ✅ Codegen infrastructure: `go tool oapi-codegen` (Go 1.26 native `tool` directive), single `Makefile`, generated code committed + verified in CI
+  - ✅ Codegen infrastructure: `go tool oapi-codegen` (Go 1.26 native `tool` directive), single `Makefile`, generated code committed + verified in CI with `make verify-generate`
   - ✅ Models, server interface, and client generated
   - ✅ Handler layer refactored to use generated request/response types; Service and Repository remain on hand-written domain models
-  - ✅ `mapper.go` per domain (`satellite`, `user`) with unit tests, including a documented no-leak guarantee for password hashes
+  - ✅ `mapper.go` per domain (`satellite`, `user`) with unit tests for defaults, response conversion, and the password-hash no-leak guarantee
   - ✅ Router implements `gen.ServerInterface` via a thin `Server` adapter and `ServerInterfaceWrapper`
   - ✅ Swagger UI at `/docs`
   - ✅ Integration tests validate the full `OpenAPI → Generated Client → ServerInterface → Handler → Service → Repository` path
-- ⏳ **Phase 4** — fleetctl CLI (using the generated client)
+- 🚧 **Phase 4** — fleetctl CLI
+  - ✅ Config at `~/.fleetctl/config.yaml`, server override, generated-client wrapper, and token injection
+  - ✅ `login` and `health`
+  - ✅ Satellite `create`, `get`, `list`, and `delete`
+  - ✅ User `create` and `list`
+  - ✅ JSON output, API error reporting, Operator-managed deletion protection, and CLI tests
 - ⏳ **Phase 5** — Declarative Apply Engine
 - ⏳ **Phase 6** — Full Operator lifecycle
 - ⏳ **Phase 7** — Fleet Control Plane Integration
@@ -341,6 +353,10 @@ The CLI, Agent, Swagger UI, and GitOps integration are still under development.
 - ⏳ **Phase 8** — GitOps with ArgoCD
 - ⏳ **Phase 9** — Observability
 - ⏳ **Phase 10** — Productionization
+
+## Next milestone
+
+Harden the Phase 4 CLI UX and then design the Phase 5 declarative Apply Engine. Agent and GitOps work remain intentionally deferred.
 
 ---
 
@@ -357,7 +373,7 @@ The CLI, Agent, Swagger UI, and GitOps integration are still under development.
 - OpenAPI should be the source of truth for the **API contract**, not for **domain logic**. Letting generated types leak into Service/Repository layers couples business logic to HTTP concerns and makes every API change ripple through the whole codebase.
 - Generated request/response types are naturally all-pointer (since nothing in the spec is marked `required`), which is appropriate for wire formats but poor for domain modeling — pointer-heavy domain structs invite nil-dereference bugs and obscure business invariants.
 - A single `Makefile` with per-target CLI flags is more maintainable than multiple near-identical `codegen.yaml` config files: one file means one place to update, and configuration drift between targets becomes structurally impossible rather than merely avoided by discipline.
-- Committing generated code (rather than gitignoring it) and verifying it in CI (`make generate && git diff --exit-code`) means a fresh clone builds immediately, and any spec/code mismatch fails CI loudly instead of causing silent drift.
+- Committing generated code (rather than gitignoring it) means a fresh clone builds immediately. `make verify-generate` provides a deterministic drift check that is enforced by CI.
 
 ## Authentication & Authorization
 

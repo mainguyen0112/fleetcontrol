@@ -8,16 +8,15 @@ import (
 	"os"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
-
-	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/mainguyen0112/fleetcontrol/api/gen"
 	"github.com/mainguyen0112/fleetcontrol/api/internal/auth"
 	"github.com/mainguyen0112/fleetcontrol/api/internal/config"
 	"github.com/mainguyen0112/fleetcontrol/api/internal/db"
+	"github.com/mainguyen0112/fleetcontrol/api/internal/docs"
 	"github.com/mainguyen0112/fleetcontrol/api/internal/health"
+	"github.com/mainguyen0112/fleetcontrol/api/internal/httpserver"
 	"github.com/mainguyen0112/fleetcontrol/api/internal/satellite"
 	"github.com/mainguyen0112/fleetcontrol/api/internal/user"
 )
@@ -56,35 +55,8 @@ func TestMain(m *testing.M) {
 
 	healthHandler := &health.Handler{DB: pool}
 
-	// server.go lives in package main (cmd/server), not importable here,
-	// so this test re-declares the same adapter wiring inline. If this
-	// drifts from cmd/server/server.go, that's a maintenance smell worth
-	// revisiting — but Go doesn't allow importing package main.
-	srv := &testServer{sat: satHandler, usr: userHandler, auth: authHandler, hlth: healthHandler}
-	wrapper := &gen.ServerInterfaceWrapper{Handler: srv}
-
-	r := chi.NewRouter()
-	r.Post("/auth/login", wrapper.PostAuthLogin)
-	r.Get("/health", wrapper.GetHealth)
-	r.Get("/version", wrapper.GetVersion)
-
-	r.Group(func(r chi.Router) {
-		r.Use(auth.Middleware(cfg.JWTSecret))
-		r.Post("/satellites", wrapper.PostSatellites)
-		r.Get("/satellites", wrapper.GetSatellites)
-		r.Get("/satellites/{id}", wrapper.GetSatellitesId)
-		r.Patch("/satellites/{id}", wrapper.PatchSatellitesId)
-		r.Delete("/satellites/{id}", wrapper.DeleteSatellitesId)
-		r.Post("/satellites/{id}/heartbeat", wrapper.PostSatellitesIdHeartbeat)
-	})
-
-	r.Group(func(r chi.Router) {
-		r.Use(auth.Middleware(cfg.JWTSecret))
-		r.Use(auth.RequireRole("admin"))
-		r.Post("/users", wrapper.PostUsers)
-		r.Get("/users", wrapper.GetUsers)
-		r.Delete("/users/{id}", wrapper.DeleteUsersId)
-	})
+	server := httpserver.NewServer(satHandler, userHandler, authHandler, healthHandler)
+	r := httpserver.NewRouter(server, docs.NewHandler(), cfg.JWTSecret, nil)
 
 	ts := httptest.NewServer(r)
 	defer ts.Close()
@@ -97,38 +69,6 @@ func TestMain(m *testing.M) {
 	apiClient = client
 
 	os.Exit(m.Run())
-}
-
-// testServer is a local copy of the gen.ServerInterface adapter, identical
-// in spirit to cmd/server/server.go. Kept minimal — see comment above.
-type testServer struct {
-	sat  *satellite.Handler
-	usr  *user.Handler
-	auth *auth.Handler
-	hlth *health.Handler
-}
-
-func (s *testServer) PostAuthLogin(w http.ResponseWriter, r *http.Request) { s.auth.Login(w, r) }
-func (s *testServer) GetHealth(w http.ResponseWriter, r *http.Request)     { s.hlth.Health(w, r) }
-func (s *testServer) GetVersion(w http.ResponseWriter, r *http.Request)    { s.hlth.Version(w, r) }
-func (s *testServer) GetSatellites(w http.ResponseWriter, r *http.Request) { s.sat.List(w, r) }
-func (s *testServer) PostSatellites(w http.ResponseWriter, r *http.Request) { s.sat.Create(w, r) }
-func (s *testServer) GetSatellitesId(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	s.sat.GetByID(w, r)
-}
-func (s *testServer) PatchSatellitesId(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	s.sat.Update(w, r)
-}
-func (s *testServer) DeleteSatellitesId(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	s.sat.Delete(w, r)
-}
-func (s *testServer) PostSatellitesIdHeartbeat(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	s.sat.Heartbeat(w, r)
-}
-func (s *testServer) GetUsers(w http.ResponseWriter, r *http.Request)  { s.usr.List(w, r) }
-func (s *testServer) PostUsers(w http.ResponseWriter, r *http.Request) { s.usr.Create(w, r) }
-func (s *testServer) DeleteUsersId(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
-	s.usr.Delete(w, r)
 }
 
 func TestSatelliteCRUD_ThroughGeneratedClient(t *testing.T) {
