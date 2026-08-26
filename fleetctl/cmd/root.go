@@ -10,10 +10,15 @@ import (
 	"github.com/mainguyen0112/fleetcontrol/fleetctl/cmd/user"
 	"github.com/mainguyen0112/fleetcontrol/fleetctl/internal/output"
 	"github.com/mainguyen0112/fleetcontrol/fleetctl/internal/runtime"
+	"github.com/mainguyen0112/fleetcontrol/fleetctl/internal/secret"
 	"github.com/spf13/cobra"
 )
 
 func NewRootCommand() *cobra.Command {
+	return newRootCommand(secret.NewPasswordReader())
+}
+
+func newRootCommand(passwords secret.PasswordReader) *cobra.Command {
 	opts := &runtime.Options{}
 	rootCmd := &cobra.Command{
 		Use:   "fleetctl",
@@ -26,7 +31,7 @@ for local development, testing, and debugging only.`,
 	}
 	rootCmd.PersistentFlags().StringVar(&opts.ConfigPath, "config", "", "config file (default ~/.fleetctl/config.yaml)")
 	rootCmd.PersistentFlags().StringVar(&opts.Server, "server", "", "FleetControl API URL (overrides config)")
-	rootCmd.AddCommand(newLoginCommand(opts), newHealthCommand(opts), satellite.NewCommand(opts), user.NewCommand(opts))
+	rootCmd.AddCommand(newLoginCommand(opts, passwords), newHealthCommand(opts), satellite.NewCommand(opts), user.NewCommand(opts, passwords))
 	return rootCmd
 }
 
@@ -37,12 +42,17 @@ func Execute() {
 	}
 }
 
-func newLoginCommand(opts *runtime.Options) *cobra.Command {
-	var username, password string
+func newLoginCommand(opts *runtime.Options, passwords secret.PasswordReader) *cobra.Command {
+	var username string
+	var passwordStdin bool
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Authenticate and save the development token",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			password, err := passwords.Read(cmd.InOrStdin(), cmd.ErrOrStderr(), passwordStdin)
+			if err != nil {
+				return err
+			}
 			client, _, err := opts.Client(false)
 			if err != nil {
 				return err
@@ -70,9 +80,8 @@ func newLoginCommand(opts *runtime.Options) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&username, "username", "", "username")
-	cmd.Flags().StringVar(&password, "password", "", "password")
+	cmd.Flags().BoolVar(&passwordStdin, "password-stdin", false, "read password from standard input")
 	_ = cmd.MarkFlagRequired("username")
-	_ = cmd.MarkFlagRequired("password")
 	return cmd
 }
 

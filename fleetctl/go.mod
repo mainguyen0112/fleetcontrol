@@ -6,6 +6,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/mainguyen0112/fleetcontrol/api v0.0.0-20260812152125-24bfd006471e
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/term v0.44.0
 )
 
 require (
@@ -14,4 +15,5 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/oapi-codegen/runtime v1.6.0 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
+	golang.org/x/sys v0.46.0 // indirect
 )

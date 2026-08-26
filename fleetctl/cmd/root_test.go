@@ -29,7 +29,8 @@ func TestLoginThenHealth(t *testing.T) {
 	login := NewRootCommand()
 	login.SetOut(loginOut)
 	login.SetErr(loginOut)
-	login.SetArgs([]string{"--config", configPath, "--server", server.URL, "login", "--username", "admin", "--password", "admin123"})
+	login.SetIn(strings.NewReader("admin123\n"))
+	login.SetArgs([]string{"--config", configPath, "--server", server.URL, "login", "--username", "admin", "--password-stdin"})
 	if err := login.Execute(); err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -47,6 +48,19 @@ func TestLoginThenHealth(t *testing.T) {
 	}
 	if !strings.Contains(healthOut.String(), `"status": "ok"`) {
 		t.Fatalf("unexpected health output: %s", healthOut.String())
+	}
+}
+
+func TestLoginDoesNotExposePasswordFlag(t *testing.T) {
+	login, _, err := NewRootCommand().Find([]string{"login"})
+	if err != nil {
+		t.Fatalf("find login: %v", err)
+	}
+	if login.Flags().Lookup("password") != nil {
+		t.Fatal("login must not accept passwords through a command-line flag")
+	}
+	if login.Flags().Lookup("password-stdin") == nil {
+		t.Fatal("login must expose --password-stdin for automation")
 	}
 }
 
