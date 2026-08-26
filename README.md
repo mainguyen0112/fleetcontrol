@@ -4,9 +4,9 @@
 
 [Architecture](docs/architecture.md) · [API Design](docs/api-design.md) · [CRD Design](docs/crd-design.md)
 
-**Status:** 🚧 Active development — **Phase 4 of 10 (CLI MVP in progress)**
+**Status:** 🚧 Active development — **Phase 4 of 10 complete (fleetctl MVP)**
 
-Phase 3 (OpenAPI-first contract) is complete: production and integration tests share the same server adapter and router, generated-code drift is checked in CI, and domain logic stays decoupled from generated types through explicit mappers. Phase 4 now provides the first functional development CLI commands.
+Phase 3 (OpenAPI-first contract) is complete: production and integration tests share the same server adapter and router, generated-code drift is checked in CI, and domain logic stays decoupled from generated types through explicit mappers. Phase 4 is also complete at its intended MVP scope: `fleetctl` provides authenticated development and debugging workflows, but is not a production source of truth.
 
 ---
 
@@ -50,8 +50,8 @@ That is what makes FleetControl an infrastructure platform instead of a CRUD app
 - ✅ Domain/API boundary enforced via explicit mappers (generated types never leak into Service/Repository)
 - ✅ Router implements the generated `ServerInterface`, wired through `ServerInterfaceWrapper`
 - ✅ Swagger UI (`/docs`)
-- 🚧 `fleetctl` CLI MVP (`login`, `health`, Satellite CRUD subset, and User commands)
-- ⏳ Declarative Apply Engine
+- ✅ `fleetctl` CLI MVP (`login`, `health`, Satellite CRUD subset, and User commands)
+- ⏳ Actor-specific authentication and authorization
 - ⏳ Real Satellite Agent
 - ⏳ Full GitOps integration
 - ⏳ Prometheus metrics
@@ -216,8 +216,8 @@ The server stores no session state, allowing multiple API instances to be deploy
 |-----------|-------------|--------|
 | `api/` | Control Plane REST API | ✅ Phase 3 implementation complete |
 | `operator/` | Kubernetes Operator | ✅ Phase 1 Complete |
-| `agent/` | Edge Heartbeat Agent | ⏳ Phase 7.5 |
-| `fleetctl/` | CLI Tool | 🚧 Phase 4 MVP in progress |
+| `agent/` | Edge Heartbeat Agent | ⏳ Phase 7 |
+| `fleetctl/` | Development/debugging CLI | ✅ Phase 4 MVP complete |
 | PostgreSQL | Metadata Storage | ✅ |
 
 ---
@@ -340,23 +340,22 @@ The CLI is for development and debugging only. The Agent and GitOps integration 
   - ✅ Router implements `gen.ServerInterface` via a thin `Server` adapter and `ServerInterfaceWrapper`
   - ✅ Swagger UI at `/docs`
   - ✅ Integration tests validate the full `OpenAPI → Generated Client → ServerInterface → Handler → Service → Repository` path
-- 🚧 **Phase 4** — fleetctl CLI
+- ✅ **Phase 4** — fleetctl CLI MVP
   - ✅ Config at `~/.fleetctl/config.yaml`, server override, generated-client wrapper, and token injection
   - ✅ `login` and `health`
   - ✅ Satellite `create`, `get`, `list`, and `delete`
   - ✅ User `create` and `list`
   - ✅ JSON output, API error reporting, Operator-managed deletion protection, and CLI tests
-- ⏳ **Phase 5** — Declarative Apply Engine
-- ⏳ **Phase 6** — Full Operator lifecycle
-- ⏳ **Phase 7** — Fleet Control Plane Integration
-- ⏳ **Phase 7.5** — Real Satellite Agent
-- ⏳ **Phase 8** — GitOps with ArgoCD
-- ⏳ **Phase 9** — Observability
-- ⏳ **Phase 10** — Productionization
+- ⏳ **Phase 5** — Trust boundary and HTTP contract repair
+- ⏳ **Phase 6** — Control Plane identity and liveness foundation
+- ⏳ **Phase 7** — Real Satellite Agent
+- ⏳ **Phase 8** — Integrated Operator lifecycle
+- ⏳ **Phase 9** — GitOps hero demo with ArgoCD
+- ⏳ **Phase 10** — Observability and productionization
 
 ## Next milestone
 
-Harden the Phase 4 CLI UX and then design the Phase 5 declarative Apply Engine. Agent and GitOps work remain intentionally deferred.
+Repair the Control Plane trust boundaries and HTTP contract before starting Agent or Operator integration. The next increment will remove client-controlled Operator identity, enforce actor-specific permissions, and align runtime error and validation behavior with OpenAPI. A separate production Apply Engine is no longer planned because GitOps and Kubernetes CRDs must remain the single source of truth.
 
 ---
 
