@@ -9,11 +9,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mainguyen0112/fleetcontrol/api/gen"
 )
 
-const DefaultServer = "http://localhost:8080"
+const (
+	DefaultServer      = "http://localhost:8080"
+	DefaultHTTPTimeout = 15 * time.Second
+)
 
 type Config struct {
 	Server string
@@ -23,6 +27,7 @@ type Config struct {
 type Options struct {
 	ConfigPath string
 	Server     string
+	HTTPClient *http.Client
 }
 
 func DefaultConfigPath() (string, error) {
@@ -104,7 +109,11 @@ func (o *Options) Client(requireAuth bool) (*gen.ClientWithResponses, []gen.Requ
 	if requireAuth && cfg.Token == "" {
 		return nil, nil, fmt.Errorf("not logged in; run fleetctl login")
 	}
-	client, err := gen.NewClientWithResponses(strings.TrimRight(cfg.Server, "/"))
+	httpClient := o.HTTPClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: DefaultHTTPTimeout}
+	}
+	client, err := gen.NewClientWithResponses(strings.TrimRight(cfg.Server, "/"), gen.WithHTTPClient(httpClient))
 	if err != nil {
 		return nil, nil, fmt.Errorf("create API client: %w", err)
 	}

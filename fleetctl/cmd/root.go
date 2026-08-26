@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -21,8 +20,10 @@ func NewRootCommand() *cobra.Command {
 func newRootCommand(passwords secret.PasswordReader) *cobra.Command {
 	opts := &runtime.Options{}
 	rootCmd := &cobra.Command{
-		Use:   "fleetctl",
-		Short: "fleetctl is a dev/debug CLI for FleetControl",
+		Use:           "fleetctl",
+		Short:         "fleetctl is a dev/debug CLI for FleetControl",
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		Long: `fleetctl is a development and debugging tool for FleetControl.
 
 It is NOT the official way to manage production fleet state — GitOps
@@ -57,7 +58,7 @@ func newLoginCommand(opts *runtime.Options, passwords secret.PasswordReader) *co
 			if err != nil {
 				return err
 			}
-			resp, err := client.PostAuthLoginWithResponse(context.Background(), gen.LoginRequest{Username: username, Password: password})
+			resp, err := client.PostAuthLoginWithResponse(cmd.Context(), gen.LoginRequest{Username: username, Password: password})
 			if err != nil {
 				return fmt.Errorf("login request: %w", err)
 			}
@@ -93,7 +94,7 @@ func newHealthCommand(opts *runtime.Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := client.GetHealthWithResponse(context.Background(), editors...)
+			resp, err := client.GetHealthWithResponse(cmd.Context(), editors...)
 			if err != nil {
 				return fmt.Errorf("health request: %w", err)
 			}

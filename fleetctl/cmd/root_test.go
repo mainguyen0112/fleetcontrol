@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -37,6 +38,13 @@ func TestLoginThenHealth(t *testing.T) {
 	if !strings.Contains(loginOut.String(), "Login successful") {
 		t.Fatalf("unexpected login output: %s", loginOut.String())
 	}
+	config, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.Contains(string(config), "admin123") {
+		t.Fatal("config must not persist the login password")
+	}
 
 	healthOut := new(bytes.Buffer)
 	health := NewRootCommand()
@@ -66,6 +74,9 @@ func TestLoginDoesNotExposePasswordFlag(t *testing.T) {
 
 func TestRootExposesPlannedCommands(t *testing.T) {
 	root := NewRootCommand()
+	if !root.SilenceErrors || !root.SilenceUsage {
+		t.Fatal("root command must leave error rendering to Execute without printing usage for runtime failures")
+	}
 	for _, name := range []string{"login", "health", "satellite", "user"} {
 		if cmd, _, err := root.Find([]string{name}); err != nil || cmd.Name() != name {
 			t.Fatalf("missing %s command", name)

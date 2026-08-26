@@ -1,7 +1,6 @@
 package user
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/mainguyen0112/fleetcontrol/api/gen"
@@ -33,7 +32,7 @@ func newCreateCommand(opts *runtime.Options, passwords secret.PasswordReader) *c
 			return err
 		}
 		apiRole := gen.CreateUserRequestRole(role)
-		resp, err := client.PostUsersWithResponse(context.Background(), gen.CreateUserRequest{Username: username, Password: password, Role: &apiRole}, editors...)
+		resp, err := client.PostUsersWithResponse(cmd.Context(), gen.CreateUserRequest{Username: username, Password: password, Role: &apiRole}, editors...)
 		if err != nil {
 			return fmt.Errorf("create user: %w", err)
 		}
@@ -55,7 +54,7 @@ func newListCommand(opts *runtime.Options) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		resp, err := client.GetUsersWithResponse(context.Background(), editors...)
+		resp, err := client.GetUsersWithResponse(cmd.Context(), editors...)
 		if err != nil {
 			return fmt.Errorf("list users: %w", err)
 		}

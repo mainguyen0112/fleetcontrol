@@ -1,7 +1,6 @@
 package satellite
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -24,7 +23,7 @@ func newCreateCommand(opts *runtime.Options) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		resp, err := client.PostSatellitesWithResponse(context.Background(), gen.CreateSatelliteRequest{Name: name, Region: region}, editors...)
+		resp, err := client.PostSatellitesWithResponse(cmd.Context(), gen.CreateSatelliteRequest{Name: name, Region: region}, editors...)
 		if err != nil {
 			return fmt.Errorf("create satellite: %w", err)
 		}
@@ -50,7 +49,7 @@ func newGetCommand(opts *runtime.Options) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		resp, err := client.GetSatellitesIdWithResponse(context.Background(), id, editors...)
+		resp, err := client.GetSatellitesIdWithResponse(cmd.Context(), id, editors...)
 		if err != nil {
 			return fmt.Errorf("get satellite: %w", err)
 		}
@@ -67,7 +66,7 @@ func newListCommand(opts *runtime.Options) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		resp, err := client.GetSatellitesWithResponse(context.Background(), editors...)
+		resp, err := client.GetSatellitesWithResponse(cmd.Context(), editors...)
 		if err != nil {
 			return fmt.Errorf("list satellites: %w", err)
 		}
@@ -88,7 +87,7 @@ func newDeleteCommand(opts *runtime.Options) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		getResp, err := client.GetSatellitesIdWithResponse(context.Background(), id, editors...)
+		getResp, err := client.GetSatellitesIdWithResponse(cmd.Context(), id, editors...)
 		if err != nil {
 			return fmt.Errorf("check satellite ownership: %w", err)
 		}
@@ -98,7 +97,7 @@ func newDeleteCommand(opts *runtime.Options) *cobra.Command {
 		if getResp.JSON200 != nil && getResp.JSON200.ManagedBy != nil && *getResp.JSON200.ManagedBy == gen.Operator {
 			return fmt.Errorf("satellite is managed by the Operator; update its CR in Git instead")
 		}
-		resp, err := client.DeleteSatellitesIdWithResponse(context.Background(), id, editors...)
+		resp, err := client.DeleteSatellitesIdWithResponse(cmd.Context(), id, editors...)
 		if err != nil {
 			return fmt.Errorf("delete satellite: %w", err)
 		}
