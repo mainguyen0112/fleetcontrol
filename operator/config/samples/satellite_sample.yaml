@@ -1,4 +1,4 @@
-apiVersion: fleetcontrol.fleetcontrol.io/v1alpha1
+apiVersion: fleetcontrol.io/v1alpha1
 kind: Satellite
 metadata:
   name: hcm-edge

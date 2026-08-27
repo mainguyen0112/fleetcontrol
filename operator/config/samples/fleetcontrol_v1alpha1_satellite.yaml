@@ -1,4 +1,4 @@
-apiVersion: fleetcontrol.fleetcontrol.io/v1alpha1
+apiVersion: fleetcontrol.io/v1alpha1
 kind: Satellite
 metadata:
   labels:
@@ -6,4 +6,4 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: satellite-sample
 spec:
-  # TODO(user): Add fields here
+  region: hcm
