@@ -4,7 +4,7 @@
 
 [Architecture](docs/architecture.md) · [API Design](docs/api-design.md) · [CRD Design](docs/crd-design.md)
 
-**Status:** 🚧 Active development — **Phase 4 of 10 complete (fleetctl MVP)**
+**Status:** 🚧 Active development — **Phase 4 of 10 complete (fleetctl MVP)** 
 
 Phase 3 (OpenAPI-first contract) is complete: production and integration tests share the same server adapter and router, generated-code drift is checked in CI, and domain logic stays decoupled from generated types through explicit mappers. Phase 4 is also complete at its intended MVP scope: `fleetctl` provides authenticated development and debugging workflows, but is not a production source of truth.
 
