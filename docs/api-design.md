@@ -1,100 +1,99 @@
-# FleetControl - API Design
+# FleetControl API Design
 
-## 1. Design Principles
+> `api/openapi/openapi.yaml` is the authoritative product HTTP contract. This document explains the current runtime and the accepted security direction. `/openapi.yaml` and `/docs` are explicit router-level documentation delivery routes rather than generated product operations. Trust and identity rules are authoritative in [ADR 0001](adr/0001-trust-identity-and-liveness.md).
 
-- The API follows an **OpenAPI-first** approach (Phase 3) — the content below is a hand-written draft that will later become the authoritative `openapi.yaml`.
-- All routes except `/health`, `/version`, and `/auth/login` require a valid JWT.
-- The `managedBy` field determines edit permissions: a client attempting to modify a Satellite with `managedBy: operator` through a manual route will be rejected (403) unless the request comes from the Operator's service account.
+## 1. Current runtime contract
 
-## 2. Auth
+The Phase 3 server uses the generated `ServerInterface`, and production and integration tests share the same adapter and router.
 
-### POST /auth/login
-Request:
-```json
-{ "username": "admin", "password": "..." }
-```
-Response:
-```json
-{ "token": "eyJ...", "expiresIn": 3600 }
-```
+### Public routes
 
-### POST /auth/refresh
-Refreshes the token before it expires.
+- `POST /auth/login`
+- `GET /health`
+- `GET /version`
 
-## 3. Satellite
+The router also exposes these unauthenticated documentation routes outside the generated `ServerInterface`:
 
-### POST /satellites
-Creates a new Satellite. Defaults to `managedBy: manual` when called via CLI/direct API; the Operator calls this with a dedicated header to set `managedBy: operator`.
+- `GET /openapi.yaml`
+- `GET /docs`
 
-Request:
-```json
-{ "name": "hcm-edge", "region": "hcm" }
-```
-Response: `201 Created`
-```json
-{
-  "id": "uuid",
-  "name": "hcm-edge",
-  "region": "hcm",
-  "status": "Pending",
-  "managedBy": "manual",
-  "lastSeenAt": null
-}
-```
+### Human-JWT routes
 
-### GET /satellites
-Lists all Satellites. Supports query params `?region=` and `?status=` for filtering.
+| Routes | Current enforcement |
+|---|---|
+| `GET /satellites`, `GET /satellites/{id}` | Any valid human JWT |
+| `POST /satellites`, `PATCH /satellites/{id}`, `DELETE /satellites/{id}` | Any valid human JWT; actor-specific authorization is not implemented yet |
+| `POST /satellites/{id}/heartbeat` | Any valid human JWT; per-Satellite Agent authentication is not implemented yet |
+| `GET /users`, `POST /users`, `DELETE /users/{id}` | Human JWT with `role=admin` |
 
-### GET /satellites/{id}
-Retrieves details of a single Satellite.
+There is currently no refresh route, Satellite filtering contract, dedicated status route, authenticated Operator creation route, or background transition to `Unreachable`.
 
-### PATCH /satellites/{id}
-Updates fields (region, etc.). Returns `403` if `managedBy: operator` and the request lacks the Operator's service-account header.
+### Known trust-boundary gaps
 
-### DELETE /satellites/{id}
-Deletes a Satellite. Same `managedBy` rule as PATCH.
+- `X-FleetControl-Operator: true` currently bypasses the Operator-owned update/delete guard. It is caller-controlled and will be removed.
+- Every valid human JWT can currently mutate Satellites and submit any Satellite's heartbeat.
+- JWT validation does not yet enforce the complete issuer, audience, subject, algorithm, and actor-kind contract.
+- Request decoding is not yet backed by OpenAPI runtime validation.
+- Some middleware and handlers do not yet return the documented JSON media type and status mapping consistently.
 
-### POST /satellites/{id}/heartbeat
-Called periodically by the Agent (every 30s — see Phase 6.5).
+These gaps are explicit Phase 5 work, not supported integration behavior.
 
-Request:
-```json
-{ "status": "Ready" }
-```
-Effect: updates `lastSeenAt = now()`, `status = Ready`.
-If no heartbeat is received for > 90s → a background job sets `status = Unreachable`.
+## 2. Accepted target boundary
 
-### GET /satellites/{id}/status
-Returns current status + lastSeenAt — used by `fleetctl health` or a dashboard.
+Authentication converts an actor-specific credential into a typed Principal. Authorization then applies this baseline matrix:
 
-## 4. User
+| Principal | API capability |
+|---|---|
+| Human + Viewer | Read Satellite state |
+| Human + Admin | Viewer capabilities, user administration, and manual Satellite lifecycle |
+| Operator | Idempotent Operator-owned Satellite reconciliation and Agent credential registration/rotation |
+| Agent | Heartbeat for the credential's bound Satellite only |
 
-### POST /users
-Admin only.
-```json
-{ "username": "viewer1", "password": "...", "role": "viewer" }
+OpenAPI records whether a route requires credentials. The service remains authoritative for principal-kind, human-role, and resource-ownership checks that OpenAPI cannot express.
+
+## 3. Satellite ownership
+
+The REST representation uses the field name `managed_by`; the Kubernetes CR status uses `managedBy`.
+
+`managed_by` is response/resource provenance and is assigned by the server:
+
+- authorized human creation produces `manual`;
+- authenticated Operator reconciliation produces `operator`; and
+- no request body or ordinary header can select or overwrite it.
+
+Manual routes reject mutation of Operator-owned resources even for a human administrator.
+
+The future Operator contract is keyed by immutable Kubernetes source UID:
+
+```http
+GET /operator/satellites/{sourceUID}
+PUT /operator/satellites/{sourceUID}
+DELETE /operator/satellites/{sourceUID}
 ```
 
-### GET /users
-Lists users (admin only).
+- `GET` returns the current record and API-owned liveness state for CR status mirroring, or `404` if it has not been materialized.
+- `PUT` returns `201` when created and `200` when reconciled or updated.
+- Repeated `PUT` requests converge on the same record.
+- `DELETE` returns `204` when deleted or already absent.
 
-### DELETE /users/{id}
-Admin only.
+These routes are Phase 6 work and are not in the current OpenAPI document.
 
-## 5. Health & Version
+## 4. Heartbeat and liveness
 
-### GET /health
-```json
-{ "status": "ok", "db": "connected" }
-```
-No auth required — used for liveness probes.
+The target heartbeat request is an authenticated assertion of presence, not a client-selected status update:
 
-### GET /version
-```json
-{ "version": "v0.1.0", "commit": "abc1234" }
-```
+- the Agent credential is bound to one Satellite;
+- the path Satellite ID must match that binding;
+- the Control Plane writes `last_seen_at` using server time;
+- new records begin `Pending`, and the Control Plane derives `Ready` and `Unreachable` from heartbeat state;
+- `Error` is reserved for a future Control Plane-detected runtime failure and is not an Operator reconciliation status; and
+- the Operator later mirrors that API-owned state into CR status.
 
-## 6. Standard Error Format (applies to the entire API)
+The MVP heartbeat loop and liveness timeout are delivered in Phases 6 and 7. There is no implemented 90-second background worker today.
+
+## 5. Error and validation contract
+
+All API errors converge on this JSON envelope:
 
 ```json
 {
@@ -105,15 +104,15 @@ No auth required — used for liveness probes.
 }
 ```
 
-## 7. Status Codes Used Consistently
+Phase 5 will make status mapping consistent:
 
-| Code | Case |
+| Status | Meaning |
 |---|---|
-| 200 | Successful GET/PATCH |
-| 201 | Successful creation via POST |
-| 204 | Successful DELETE |
-| 400 | Validation error |
-| 401 | Missing/invalid token |
-| 403 | Valid permission but blocked by `managedBy` rule or role |
-| 404 | Resource not found |
-| 409 | Conflict (e.g. duplicate Satellite name) |
+| `400` | Malformed or contract-invalid input |
+| `401` | Missing, invalid, or expired credential |
+| `403` | Authenticated principal lacks the required capability or ownership permission |
+| `404` | Requested resource does not exist |
+| `409` | Uniqueness or state conflict |
+| `500` | Unexpected internal error; storage details are not exposed |
+
+Runtime request validation, typed domain errors, and generated-client integration tests must verify these responses before Phase 5 is complete.

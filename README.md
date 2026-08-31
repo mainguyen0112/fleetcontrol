@@ -1,12 +1,12 @@
 # FleetControl
 
-> GitOps-based Edge Fleet Management Platform built with Go, Kubernetes Operators, PostgreSQL, and a real heartbeat-reporting Agent.
+> GitOps-based Edge Fleet Management Platform built with Go, Kubernetes Operators, and PostgreSQL, with a real heartbeat-reporting Agent planned for Phase 7.
 
-[Architecture](docs/architecture.md) · [API Design](docs/api-design.md) · [CRD Design](docs/crd-design.md)
+[Architecture](docs/architecture.md) · [API Design](docs/api-design.md) · [CRD Design](docs/crd-design.md) · [ADR 0001: Trust, Identity, and Liveness](docs/adr/0001-trust-identity-and-liveness.md)
 
-**Status:** 🚧 Active development — **Phase 4 of 10 complete (fleetctl MVP)** 
+**Status:** 🚧 Active development — **Phase 5 of 10 in progress (trust boundary and HTTP contract)**
 
-Phase 3 (OpenAPI-first contract) is complete: production and integration tests share the same server adapter and router, generated-code drift is checked in CI, and domain logic stays decoupled from generated types through explicit mappers. Phase 4 is also complete at its intended MVP scope: `fleetctl` provides authenticated development and debugging workflows, but is not a production source of truth.
+Phases 3 and 4 are complete: the OpenAPI-first Control Plane path is verified in CI, and `fleetctl` provides its intended development/debugging MVP. Phase 5 has started. Phase 5.0 normalized the Satellite Kubernetes API group to `fleetcontrol.io`; Phase 5.1 records the accepted trust, identity, credential, and liveness ownership model. The current runtime still has the transitional authorization gaps listed in ADR 0001, so the real Agent and Operator-to-API reconciliation remain intentionally unimplemented.
 
 ---
 
@@ -37,8 +37,8 @@ That is what makes FleetControl an infrastructure platform instead of a CRUD app
 - ✅ Kubernetes Operator foundation (Kubebuilder)
 - ✅ Control Plane REST API (Go)
 - ✅ PostgreSQL persistence
-- ✅ JWT Authentication
-- ✅ Role-Based Access Control (Admin / Viewer)
+- ✅ Human login and JWT authentication
+- ✅ Admin/viewer human roles (the current admin gate covers User routes)
 - ✅ Satellite CRUD
 - ✅ User CRUD
 - ✅ Business rule enforcement (`managed_by`)
@@ -48,10 +48,11 @@ That is what makes FleetControl an infrastructure platform instead of a CRUD app
 - ✅ Integration tests covering authentication and CRUD flow
 - ✅ OpenAPI-first contract: spec-driven models, server interface, and client generation
 - ✅ Domain/API boundary enforced via explicit mappers (generated types never leak into Service/Repository)
-- ✅ Router implements the generated `ServerInterface`, wired through `ServerInterfaceWrapper`
+- ✅ Thin `Server` adapter implements the generated `ServerInterface`; the router mounts it through `ServerInterfaceWrapper`
 - ✅ Swagger UI (`/docs`)
 - ✅ `fleetctl` CLI MVP (`login`, `health`, Satellite CRUD subset, and User commands)
-- ⏳ Actor-specific authentication and authorization
+- ✅ Satellite Kubernetes API group normalized to `fleetcontrol.io`
+- ⏳ Typed principals and actor-specific authorization (target model accepted in ADR 0001)
 - ⏳ Real Satellite Agent
 - ⏳ Full GitOps integration
 - ⏳ Prometheus metrics
@@ -63,44 +64,37 @@ That is what makes FleetControl an infrastructure platform instead of a CRUD app
 The diagram below describes the intended end state. Today, the Control Plane API and Operator prototype exist, while the real Agent, Operator-to-API reconciliation, and end-to-end GitOps flow are still planned.
 
 ```text
-               Developer / Platform Engineer
-                           │
-                           ▼
-                    Git Repository
-                           │
-                           ▼
-                        ArgoCD
-                           │
-                           ▼
-              Fleet Operator (Reconciliation)
-                           │
-                    Generated Client
-                           │
-                           ▼
-                 Control Plane REST API
-                           ▲
-                           │
-   fleetctl (Development / Debugging Only, via Generated Client)
-                           │
-                           ▼
-                     PostgreSQL Database
-                           ▲
-                           │
-              Satellite Agent (Heartbeat)
+ Developer / Platform Engineer
+             │
+             ▼
+      Git Repository ──> ArgoCD ──> Satellite CR
+                                         │
+                                         ▼
+                               Fleet Operator
+                               (generated client)
+                                         │
+                                         ▼
+fleetctl (dev/debug) ─────────> Control Plane API <──────── Satellite Agent
+ (generated client)                 │                         (heartbeat)
+                                    ▼
+                               PostgreSQL
 ```
 
 ---
 
 # Source of Truth
 
-One of the earliest architectural decisions made in this project is defining **who owns fleet state**.
+One of the earliest architectural decisions made in this project is defining **who owns fleet state**. The following is the accepted target invariant; Operator and Agent enforcement is delivered in Phases 5–8 rather than claimed as current runtime behavior.
 
 FleetControl intentionally separates declarative and imperative workflows.
 
 - **GitOps + Kubernetes CRDs** are the official way to manage production Satellites.
 - **fleetctl** is intended only for local development, testing, and debugging.
-- Satellites created by the Operator are marked as `managed_by = operator`.
+- Operator routes derive `managed_by = operator` from an authenticated Operator principal; clients never choose this value.
 - Manual updates to Operator-managed Satellites are rejected by the Control Plane API to prevent configuration drift.
+- `managed_by` records resource provenance and never acts as proof of caller identity.
+
+The complete principal, credential, permission, and liveness ownership decisions are recorded in [ADR 0001](docs/adr/0001-trust-identity-and-liveness.md).
 
 Making this ownership decision before implementation greatly simplifies later development.
 
@@ -118,10 +112,13 @@ FleetControl intentionally follows several engineering principles.
 HTTP Request
     │
     ▼
-Router (gen.ServerInterface, via ServerInterfaceWrapper)
+Chi Router + Middleware
     │
     ▼
-Middleware
+ServerInterfaceWrapper
+    │
+    ▼
+Server adapter (implements gen.ServerInterface)
     │
     ▼
 Handler (generated request/response types)
@@ -140,8 +137,9 @@ Each layer has exactly one responsibility.
 
 | Layer | Responsibility |
 |--------|----------------|
-| Router | Implements the OpenAPI-generated `ServerInterface`; routes incoming requests |
-| Middleware | Authentication, authorization, logging |
+| Router + Middleware | Route grouping, authentication, authorization, and request logging |
+| Generated wrapper | Binds HTTP path parameters and dispatches generated operations |
+| Server adapter | Implements the generated `ServerInterface` and delegates to domain handlers |
 | Handler | HTTP parsing, generated request/response types, calls mapper + service |
 | Mapper | Explicit, hand-written conversion between generated API types and domain models |
 | Service | Business logic, operates on domain models only |
@@ -204,9 +202,9 @@ Instead of issuing imperative commands against production systems, desired state
 
 ### Stateless API
 
-Authentication is implemented with JWT.
+Human authentication currently uses JWT. Phase 5 will turn validated credentials into typed principals and harden JWT validation. The future Operator and Agent use workload-specific credentials; an Agent credential is bound to one Satellite rather than reusing a human JWT.
 
-The server stores no session state, allowing multiple API instances to be deployed behind a load balancer without session synchronization.
+The server stores no human session state, allowing multiple API instances to be deployed behind a load balancer without session synchronization. Revocable machine-credential digests are persisted because workload identity has different lifecycle requirements from a human login session.
 
 ---
 
@@ -215,7 +213,7 @@ The server stores no session state, allowing multiple API instances to be deploy
 | Component | Description | Status |
 |-----------|-------------|--------|
 | `api/` | Control Plane REST API | ✅ Phase 3 implementation complete |
-| `operator/` | Kubernetes Operator | ✅ Phase 1 Complete |
+| `operator/` | Kubernetes Operator foundation and normalized `fleetcontrol.io` API group | 🚧 Foundation complete; integration planned for Phase 8 |
 | `agent/` | Edge Heartbeat Agent | ⏳ Phase 7 |
 | `fleetctl/` | Development/debugging CLI | ✅ Phase 4 MVP complete |
 | PostgreSQL | Metadata Storage | ✅ |
@@ -230,7 +228,7 @@ The server stores no session state, allowing multiple API instances to be deploy
 | **Chi Router** | Lightweight, idiomatic router built on `net/http`. Easier to understand and test than heavier frameworks while remaining highly extensible. |
 | **PostgreSQL** | Reliable relational database with excellent consistency, indexing, and mature tooling. Fleet metadata naturally fits relational modeling. |
 | **pgx** | Native PostgreSQL driver offering better PostgreSQL support and performance than generic `database/sql` drivers. |
-| **JWT** | Stateless authentication suitable for APIs and future Agent communication without server-side sessions. |
+| **JWT** | Short-lived stateless authentication for human API/CLI sessions; machine identities use separate workload credentials. |
 | **bcrypt** | Industry-standard password hashing algorithm resistant to brute-force attacks. Passwords are never stored in plaintext. |
 | **Zap** | High-performance structured JSON logging designed for production services and centralized log aggregation. |
 | **Docker Compose** | Simple reproducible local development environment for API and PostgreSQL. |
@@ -249,6 +247,9 @@ fleetcontrol/
 │   │   └── openapi.yaml   # single source of truth for the API contract
 │   ├── gen/                # generated models, server interface, client (committed)
 │   ├── internal/
+│   │   ├── httpserver/
+│   │   │   ├── router.go    # Chi routes, middleware, generated wrapper
+│   │   │   └── server.go    # adapter implementing gen.ServerInterface
 │   │   └── <domain>/
 │   │       ├── model.go     # domain model (hand-written, no gen.* dependency)
 │   │       ├── mapper.go    # explicit gen.* ↔ domain conversion
@@ -256,8 +257,7 @@ fleetcontrol/
 │   │       ├── service.go   # business logic, domain models only
 │   │       └── repository.go
 │   ├── cmd/server/
-│   │   ├── main.go
-│   │   └── server.go        # adapter implementing gen.ServerInterface
+│   │   └── main.go          # composition root
 │   └── Makefile              # make generate / make verify-generate
 ├── operator/         # Kubernetes Operator
 ├── agent/            # Edge Agent (upcoming)
@@ -265,6 +265,8 @@ fleetcontrol/
 ├── deploy/           # Helm & ArgoCD manifests
 ├── observability/    # Prometheus & Grafana
 ├── docs/
+│   ├── adr/
+│   │   └── 0001-trust-identity-and-liveness.md
 │   ├── architecture.md
 │   ├── api-design.md
 │   └── crd-design.md
@@ -325,7 +327,7 @@ The CLI is for development and debugging only. The Agent and GitOps integration 
 - ✅ **Phase 1** — Kubernetes Operator Spike
 - ✅ **Phase 2** — Control Plane API
   - JWT Authentication
-  - RBAC
+  - Basic admin role guard for User routes
   - CRUD APIs
   - Heartbeat endpoint
   - Health endpoint
@@ -337,7 +339,7 @@ The CLI is for development and debugging only. The Agent and GitOps integration 
   - ✅ Models, server interface, and client generated
   - ✅ Handler layer refactored to use generated request/response types; Service and Repository remain on hand-written domain models
   - ✅ `mapper.go` per domain (`satellite`, `user`) with unit tests for defaults, response conversion, and the password-hash no-leak guarantee
-  - ✅ Router implements `gen.ServerInterface` via a thin `Server` adapter and `ServerInterfaceWrapper`
+  - ✅ Thin `Server` adapter implements `gen.ServerInterface`; the router mounts it through `ServerInterfaceWrapper`
   - ✅ Swagger UI at `/docs`
   - ✅ Integration tests validate the full `OpenAPI → Generated Client → ServerInterface → Handler → Service → Repository` path
 - ✅ **Phase 4** — fleetctl CLI MVP
@@ -346,7 +348,14 @@ The CLI is for development and debugging only. The Agent and GitOps integration 
   - ✅ Satellite `create`, `get`, `list`, and `delete`
   - ✅ User `create` and `list`
   - ✅ JSON output, API error reporting, Operator-managed deletion protection, and CLI tests
-- ⏳ **Phase 5** — Trust boundary and HTTP contract repair
+- 🚧 **Phase 5** — Trust boundary and HTTP contract repair
+  - ✅ Phase 5.0: normalize the Satellite API group to `fleetcontrol.io`
+  - ✅ Phase 5.1: accept the trust, identity, credential, and liveness ownership model in ADR 0001
+  - ⏳ Typed Principal and authentication layering
+  - ⏳ JWT hardening and actor-specific authorization
+  - ⏳ Typed domain errors and consistent HTTP mapping
+  - ⏳ OpenAPI/runtime validation alignment
+  - ⏳ PostgreSQL-backed security integration tests and documentation closeout
 - ⏳ **Phase 6** — Control Plane identity and liveness foundation
 - ⏳ **Phase 7** — Real Satellite Agent
 - ⏳ **Phase 8** — Integrated Operator lifecycle
@@ -355,7 +364,7 @@ The CLI is for development and debugging only. The Agent and GitOps integration 
 
 ## Next milestone
 
-Repair the Control Plane trust boundaries and HTTP contract before starting Agent or Operator integration. The next increment will remove client-controlled Operator identity, enforce actor-specific permissions, and align runtime error and validation behavior with OpenAPI. A separate production Apply Engine is no longer planned because GitOps and Kubernetes CRDs must remain the single source of truth.
+Implement the typed `Principal` and authentication layering defined by ADR 0001, beginning with unit tests around principal invariants and credential-to-principal conversion. Client-controlled Operator identity, actor-specific authorization, and HTTP/OpenAPI repair follow as separate coherent increments. Agent and Operator integration remain blocked until Phase 5 is green. A separate production Apply Engine is not planned because GitOps and Kubernetes CRDs remain the single source of truth.
 
 ---
 
@@ -370,13 +379,14 @@ Repair the Control Plane trust boundaries and HTTP contract before starting Agen
 ## Contract-First API Development
 
 - OpenAPI should be the source of truth for the **API contract**, not for **domain logic**. Letting generated types leak into Service/Repository layers couples business logic to HTTP concerns and makes every API change ripple through the whole codebase.
-- Generated request/response types are naturally all-pointer (since nothing in the spec is marked `required`), which is appropriate for wire formats but poor for domain modeling — pointer-heavy domain structs invite nil-dereference bugs and obscure business invariants.
+- Generated wire types reflect HTTP optionality: required request fields are values, while optional or nullable properties commonly become pointers. That transport-level shape is useful at the boundary but remains a poor domain model because it can obscure business invariants and spread nil handling through core logic.
 - A single `Makefile` with per-target CLI flags is more maintainable than multiple near-identical `codegen.yaml` config files: one file means one place to update, and configuration drift between targets becomes structurally impossible rather than merely avoided by discipline.
 - Committing generated code (rather than gitignoring it) means a fresh clone builds immediately. `make verify-generate` provides a deterministic drift check that is enforced by CI.
 
 ## Authentication & Authorization
 
-- Authentication (JWT) and authorization (RBAC) solve different problems and should remain separate.
+- Authentication, authorization, and resource ownership solve different problems and must remain separate.
+- Human roles (`admin`, `viewer`) are distinct from actor kinds (`human`, `operator`, `agent`).
 - Stateless JWT authentication enables horizontal scaling without server-side session storage.
 - Passwords should never be stored directly; bcrypt provides adaptive hashing that significantly increases resistance to brute-force attacks.
 - Explicit, hand-written mapping between domain and API models (rather than reflection or struct-tag-based mapping) is worth the verbosity for security-sensitive objects like `User` — it makes it structurally obvious that a field such as `PasswordHash` never has a path to the JSON response.

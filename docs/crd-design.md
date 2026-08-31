@@ -1,20 +1,39 @@
-# FleetControl - CRD Design
+# FleetControl CRD Design
 
-## 1. Overview
+> This document distinguishes the current Kubebuilder spike from the accepted reconciliation target. Trust, credential, and liveness ownership are authoritative in [ADR 0001](adr/0001-trust-identity-and-liveness.md).
 
-The `Satellite` Custom Resource Definition (CRD) represents an edge site managed by FleetControl. It is the **declarative entry point** for the GitOps workflow: when a `Satellite` resource is created, updated, or deleted in the cluster, the Fleet Operator reconciles it against the Control Plane API (see `architecture.md` for the Source of Truth decision).
-
-## 2. API Group & Version
+## 1. API group and version
 
 ```text
 Group:   fleetcontrol.io
 Version: v1alpha1
 Kind:    Satellite
+Scope:   Namespaced
 ```
 
-`v1alpha1` signals the API is still evolving — fields may change without a formal deprecation cycle until it reaches `v1`.
+The duplicated-domain API group from the original scaffold was normalized to `fleetcontrol.io` in Phase 5.0. Because the project has not reached `v1`, the schema and reconciliation behavior may still evolve without a formal compatibility guarantee.
 
-## 3. Full Resource Example
+## 2. Current Operator spike
+
+The repository currently provides:
+
+- the generated Satellite CRD and RBAC manifests;
+- a controller-runtime manager and reconciler;
+- a minimal `spec.region` field;
+- status fields for phase, ownership, heartbeat, and conditions; and
+- `envtest` controller coverage.
+
+The current reconciler only demonstrates the watch/status-update path. It marks a reconciled resource as ready and Operator-managed without contacting the Control Plane. It does not yet:
+
+- call the generated Control Plane client;
+- authenticate as an Operator principal;
+- create or rotate an Agent credential Secret;
+- install or process a finalizer; or
+- mirror real heartbeat/liveness state.
+
+Consequently, current CR `Ready` status is prototype behavior and must not be interpreted as proof that an Agent is alive.
+
+## 3. Resource shape
 
 ```yaml
 apiVersion: fleetcontrol.io/v1alpha1
@@ -30,71 +49,104 @@ status:
   conditions:
     - type: Ready
       status: "True"
-      reason: HeartbeatReceived
+      reason: HeartbeatObserved
+      message: Control Plane reports a recent Agent heartbeat
+      observedGeneration: 3
       lastTransitionTime: "2026-06-21T10:00:00Z"
     - type: Synced
       status: "True"
       reason: ControlPlaneInSync
+      message: Desired state matches the Control Plane record
+      observedGeneration: 3
       lastTransitionTime: "2026-06-21T09:59:00Z"
 ```
 
-## 4. Spec Fields
+### Spec
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `spec.region` | string | Yes | Logical region/site identifier (e.g. `hcm`, `hn`, `dn`) |
+| `spec.region` | string | Yes | Logical region/site identifier such as `hcm`, `hn`, or `dn` |
 
-Intentionally minimal for the MVP — additional fields (e.g. `spec.tags`, `spec.config`) can be added in later phases without breaking existing manifests, since `v1alpha1` allows additive changes.
+The MVP spec remains intentionally small. Git owns desired spec, and ArgoCD synchronizes it into Kubernetes.
 
-## 5. Status Fields (managed by the Operator — never set manually)
+### Status schema
 
-| Field | Type | Description |
+| Field | Type | Intended meaning |
 |---|---|---|
-| `status.phase` | string | `Pending` \| `Ready` \| `Error` \| `Unreachable` — mirrors the Satellite's status in the Control Plane API |
-| `status.managedBy` | string | Always `operator` for resources created via this CRD |
-| `status.lastHeartbeat` | string (RFC3339) | Last heartbeat timestamp received from the Satellite Agent, synced from the Control Plane API |
-| `status.conditions` | []Condition | Standard Kubernetes-style conditions (see below) |
+| `status.phase` | string | Mirror of the Control Plane runtime phase: `Pending`, `Ready`, or `Unreachable`; `Error` is reserved for future Control Plane runtime failures |
+| `status.managedBy` | string | `operator` for a record reconciled from this CR |
+| `status.lastHeartbeat` | RFC3339 timestamp | Mirror of the last server-recorded Agent heartbeat |
+| `status.conditions` | `[]Condition` | Kubernetes-style reconciliation and observed-runtime conditions |
 
-## 6. Conditions
+## 4. Target reconciliation identity
 
-Following the standard Kubernetes condition pattern (used by Crossplane, Cluster API, etc.):
+The Operator authenticates with a workload credential and reconciles a CR through an idempotent Control Plane API keyed by `metadata.uid`:
 
-| Condition Type | Meaning |
+```http
+GET /operator/satellites/{sourceUID}
+PUT /operator/satellites/{sourceUID}
+DELETE /operator/satellites/{sourceUID}
+```
+
+The Control Plane stores `source_uid` as immutable identity and retains namespace/name as descriptive metadata. Repeated reconciliation, controller restarts, and resyncs therefore cannot create duplicate database records. Deleting and recreating a CR produces a new Kubernetes UID and intentionally creates a new source identity.
+
+Target behavior:
+
+| Trigger | Operator action |
 |---|---|
-| `Ready` | The Satellite Agent has sent a recent heartbeat and the site is operational |
-| `Synced` | The CRD spec matches the Control Plane API's record (no pending reconciliation) |
-| `Error` | Set to `True` when the Operator fails to reach the Control Plane API (`Reason: APIUnavailable`) |
+| CR created or spec changed | Idempotent `PUT`; create/update the Agent Secret as needed; set reconciliation status |
+| Periodic requeue | `GET` by source UID; mirror runtime phase and last heartbeat into CR status |
+| CR deleted | Idempotent `DELETE`; remove the finalizer only after the Control Plane operation succeeds |
+| Control Plane unavailable | Preserve the finalizer, record reconciliation failure, and requeue with backoff |
 
-## 7. Finalizer
+This replaces the earlier planned POST/PATCH plus read-before-create flow.
+
+## 5. Status ownership
+
+| State | Authoritative owner | Operator responsibility |
+|---|---|---|
+| Desired region/configuration | Git and CR spec | Reconcile it to the Control Plane |
+| `Synced` condition | Operator | Report whether desired state converged |
+| Reconciliation failure | Operator | Record the failure and retry |
+| Runtime phase | Control Plane | Mirror it; do not derive it independently. `Error` is reserved and is not used for reconciliation failures |
+| Last heartbeat timestamp | Control Plane | Mirror it from the API |
+| `Ready` condition | Control Plane-derived liveness | Translate the observed API phase into CR condition form |
+
+The Agent reports heartbeat only to the Control Plane. Kubernetes does not observe PostgreSQL changes, so the MVP Operator uses periodic `RequeueAfter` polling to refresh mirrored status.
+
+## 6. Agent credential Secret
+
+For each reconciled Satellite, the Operator owns plaintext credential generation:
+
+1. Generate a cryptographically random token with at least 256 bits of entropy.
+2. Store it in a namespaced Kubernetes Secret consumed by the Agent.
+3. Register or rotate the token through an authenticated Operator endpoint.
+4. Retry safely with the same Secret value after partial failure.
+
+The Control Plane stores only the token digest. Plaintext credentials never appear in the CR spec or status.
+
+## 7. Finalizer target
 
 ```text
 fleetcontrol.io/finalizer
 ```
 
-Added automatically on creation. Ensures that when a `Satellite` resource is deleted:
-1. The Operator first calls `DELETE /satellites/{id}` on the Control Plane API.
-2. Only after a successful API response does the Operator remove the finalizer, allowing Kubernetes to fully delete the CR.
+The finalizer will prevent a CR from disappearing before its Control Plane record and credential association have been deleted. Deleting an already-absent Control Plane record returns success, making finalization retry-safe.
 
-This prevents orphaned records in the Control Plane database when a CRD is deleted.
+The finalizer is planned for Phase 8 and is not present in the current controller.
 
-## 8. Reconciliation Behavior Summary
-
-| Trigger | Operator Action |
-|---|---|
-| CR created | Call `POST /satellites` with `managedBy: operator`, set `status.phase: Pending` |
-| CR spec updated | Call `PATCH /satellites/{id}`, update `status.conditions[Synced]` |
-| CR deleted | Call `DELETE /satellites/{id}` via finalizer, then remove finalizer |
-| API unreachable | Set `status.conditions[Error] = True`, requeue with backoff (`RequeueAfter`) |
-| Heartbeat received (via API polling or webhook) | Update `status.lastHeartbeat`, `status.phase: Ready` |
-
-## 9. Relationship to Other Components
+## 8. Component relationship
 
 ```text
-Satellite CRD  ──(reconcile)──>  Fleet Operator  ──(REST call)──>  Control Plane API
-                                                                          ↑
-                                                                    heartbeat
-                                                                          │
-                                                                  Satellite Agent
+Git -> ArgoCD -> Satellite CR
+                         ^  |
+                  status |  | desired state
+                         |  v
+                 Fleet Operator <----> Control Plane API ----> PostgreSQL
+                                             ^
+                                             |
+                                      Satellite Agent
+                                        (heartbeat)
 ```
 
-The CRD never talks directly to the Agent — it only reflects the state that the Control Plane API already knows, keeping the Operator's responsibility limited to reconciliation (not data ownership).
+The CRD never communicates directly with an Agent or database. The Operator reconciles desired state and mirrors observed state; the Control Plane owns runtime liveness.

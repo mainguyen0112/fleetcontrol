@@ -1,61 +1,88 @@
-# FleetControl - Architecture
+# FleetControl Architecture
 
-## 1. High-Level Architecture
+> This document separates the code that exists today from the accepted target architecture. Trust and identity decisions are authoritative in [ADR 0001](adr/0001-trust-identity-and-liveness.md).
+
+## 1. Current state
+
+The repository currently contains:
+
+- a Control Plane REST API backed by PostgreSQL;
+- a Phase 4 `fleetctl` MVP that calls the API through the generated OpenAPI client;
+- a Kubebuilder Operator foundation with the `fleetcontrol.io/v1alpha1` Satellite CRD;
+- an OpenAPI-generated server/client boundary with unit and PostgreSQL integration tests; and
+- CI for generated-code drift, API tests, CLI tests, and Operator `envtest` tests.
+
+The Operator does not yet call the Control Plane, the Agent is not implemented, and ArgoCD is not wired into an end-to-end flow. The current API authenticates human JWTs, but actor-specific authorization and workload credentials are Phase 5 and Phase 6 work.
 
 ```text
-Developer / Platform Engineer
-            ↓
-      Git Repository (fleet-configs)
-            ↓
-          ArgoCD
-            ↓
-      Fleet Operator (CRD watcher)
-            ↓
-     Control Plane API  ←──── fleetctl (dev/debug only)
-            ↓
-        PostgreSQL
-            ↓
-     Satellite Agent (runs at each edge site, heartbeats back to the API)
+fleetctl ──generated client──> Control Plane API ──> PostgreSQL
+
+Fleet Operator prototype ──> Satellite CR status only
+
+Satellite Agent and end-to-end GitOps flow: planned
 ```
 
-## 2. Source of Truth (key decision)
+## 2. Target architecture
 
-- **GitOps/CRD is the official path** for creating/updating Satellites in a production-like environment.
-- `fleetctl satellite create/update/delete` is intended for **dev/test/debug only**, not for managing the real fleet.
-- Each Satellite has a `managedBy` field:
-  - `operator` — created via CRD/GitOps
-  - `manual` — created directly via the CLI
-- If the CLI attempts to modify a Satellite with `managedBy: operator`, the system will warn or reject the operation.
-
-## 3. Domain Model
-
-```go
-type Satellite struct {
-    ID         string
-    Name       string
-    Region     string
-    Status     string // Pending, Ready, Error, Unreachable
-    ManagedBy  string // "operator" | "manual"
-    LastSeenAt *time.Time
-}
-
-type User struct {
-    ID       string
-    Username string
-    Role     string // admin | viewer
-}
+```text
+ Developer / Platform Engineer
+             │
+             ▼
+      Git Repository ──> ArgoCD ──> Satellite CR
+                                         │
+                                         ▼
+                               Fleet Operator
+                               (generated client)
+                                         │
+                                         ▼
+fleetctl (dev/debug) ─────────> Control Plane API <──────── Satellite Agent
+ (generated client)                 │                         (heartbeat)
+                                    ▼
+                               PostgreSQL
 ```
 
-## 4. Core Components
+Only the Control Plane API accesses PostgreSQL. `fleetctl`, the Operator, and the Agent are API clients with distinct authenticated principals and permissions.
 
-| Component | Role | Tech Stack |
+## 3. Source of truth and ownership
+
+| Concern | Authoritative owner |
+|---|---|
+| Production desired Satellite state | Git, synchronized to Kubernetes by ArgoCD |
+| Declarative reconciliation | Fleet Operator |
+| Manual development/debug lifecycle | Human administrator through API or `fleetctl` |
+| Resource provenance (`managed_by`) | Control Plane, derived from the authenticated route/principal |
+| Runtime heartbeat timestamp and liveness phase | Control Plane |
+| CR `Synced` and reconciliation-error state | Fleet Operator |
+| CR `Ready` and `lastHeartbeat` | Fleet Operator mirror of Control Plane state |
+
+`managed_by` has two values:
+
+- `operator` for a record materialized through an authenticated Operator workflow; and
+- `manual` for a record created through an authorized human workflow.
+
+It is resource provenance, not caller identity. Clients cannot select it, and manual routes reject mutation of Operator-owned records.
+
+## 4. Trust boundary
+
+FleetControl distinguishes three actor kinds:
+
+- `human`, with a separate `admin` or `viewer` role;
+- `operator`, representing the reconciliation workload; and
+- `agent`, bound to one Satellite.
+
+Authentication converts a verified actor-specific credential into a typed Principal. Authorization checks that principal against an explicit capability, and the domain layer applies ownership rules. Headers and request bodies do not establish workload identity.
+
+See [ADR 0001](adr/0001-trust-identity-and-liveness.md) for the permission matrix, credential lifecycle, idempotent Operator API, and liveness ownership decision.
+
+## 5. Core components
+
+| Component | Responsibility | Status |
 |---|---|---|
-| Control Plane API | Stores state, exposes REST API | Go + PostgreSQL |
-| Fleet CLI (fleetctl) | Manual/dev interaction with the API | Go + Cobra |
-| Fleet Operator | Reconciles CRD ↔ API | Kubebuilder + controller-runtime |
-| Satellite Agent | A real process running at the edge site, sends heartbeats | Go |
+| Control Plane API | HTTP contract, authorization, fleet metadata, and runtime liveness | Implemented foundation; Phase 5 hardening in progress |
+| PostgreSQL | Durable users, Satellite state, and future credential digests | Implemented foundation |
+| `fleetctl` | Manual development and debugging workflows | Phase 4 MVP complete |
+| Fleet Operator | Reconcile Satellite CR desired state with the Control Plane | Foundation only; integration planned for Phase 8 |
+| Satellite Agent | Authenticate as one Satellite and report heartbeat | Planned for Phase 7 |
+| ArgoCD | Synchronize Git desired state into Kubernetes | Planned for Phase 9 |
 
-## 5. Open Questions Answered (Phase 0 self-check)
-
-- Who is allowed to modify a Satellite? → The Operator (via GitOps) is the official path; the CLI is for dev/test only.
-- What happens if the CLI and Git both try to modify the same Satellite? → `managedBy` prevents conflicts; the CLI warns when attempting to edit a resource managed by the Operator.
+FleetControl deliberately has no second production Apply Engine. Git, ArgoCD, CRDs, and the Operator form the declarative reconciliation path.
