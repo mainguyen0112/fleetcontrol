@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
@@ -12,7 +11,7 @@ import (
 
 type Handler struct {
 	DB     *pgxpool.Pool
-	Secret string
+	Tokens *JWTManager
 }
 
 type loginRequest struct {
@@ -50,8 +49,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ttl := time.Hour
-	token, err := GenerateToken(h.Secret, userID, role, ttl)
+	token, err := h.Tokens.GenerateHumanToken(userID, HumanRole(role))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "TOKEN_ERROR", "failed to generate token")
 		return
@@ -60,7 +58,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(loginResponse{
 		Token:     token,
-		ExpiresIn: int(ttl.Seconds()),
+		ExpiresIn: int(HumanTokenTTL.Seconds()),
 	})
 }
 

@@ -26,7 +26,7 @@ func withPrincipal(ctx context.Context, principal Principal) context.Context {
 	return context.WithValue(ctx, principalContextKey, principal)
 }
 
-func Middleware(secret string) func(http.Handler) http.Handler {
+func Middleware(tokens *JWTManager) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			header := r.Header.Get("Authorization")
@@ -36,13 +36,7 @@ func Middleware(secret string) func(http.Handler) http.Handler {
 			}
 
 			tokenStr := strings.TrimPrefix(header, "Bearer ")
-			claims, err := ParseToken(secret, tokenStr)
-			if err != nil {
-				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"invalid token"}}`, http.StatusUnauthorized)
-				return
-			}
-
-			principal, err := NewHumanPrincipal(claims.UserID, HumanRole(claims.Role))
+			principal, err := tokens.ParseHumanToken(tokenStr)
 			if err != nil {
 				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"invalid token"}}`, http.StatusUnauthorized)
 				return

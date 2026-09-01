@@ -26,13 +26,22 @@ func main() {
 	}
 	defer log.Sync()
 
+	tokens, err := auth.NewJWTManager(auth.JWTConfig{
+		Secret:   cfg.JWTSecret,
+		Issuer:   cfg.JWTIssuer,
+		Audience: cfg.JWTAudience,
+	})
+	if err != nil {
+		log.Fatal("invalid JWT configuration", zap.Error(err))
+	}
+
 	pool, err := db.Connect(context.Background(), cfg.DBUrl)
 	if err != nil {
 		log.Fatal("failed to connect to db", zap.Error(err))
 	}
 	defer pool.Close()
 
-	authHandler := &auth.Handler{DB: pool, Secret: cfg.JWTSecret}
+	authHandler := &auth.Handler{DB: pool, Tokens: tokens}
 
 	satRepo := satellite.NewPostgresRepository(pool)
 	satService := satellite.NewService(satRepo)
@@ -46,7 +55,7 @@ func main() {
 	docsHandler := docs.NewHandler()
 
 	server := httpserver.NewServer(satHandler, userHandler, authHandler, healthHandler)
-	r := httpserver.NewRouter(server, docsHandler, cfg.JWTSecret, logger.RequestLogger(log))
+	r := httpserver.NewRouter(server, docsHandler, tokens, logger.RequestLogger(log))
 
 	log.Info("server listening", zap.String("port", cfg.Port))
 	if err := http.ListenAndServe(":"+cfg.Port, r); err != nil {

@@ -43,7 +43,16 @@ func TestMain(m *testing.M) {
 		log.Fatal("failed to connect to db", zap.Error(err))
 	}
 
-	authHandler := &auth.Handler{DB: pool, Secret: cfg.JWTSecret}
+	tokens, err := auth.NewJWTManager(auth.JWTConfig{
+		Secret:   cfg.JWTSecret,
+		Issuer:   cfg.JWTIssuer,
+		Audience: cfg.JWTAudience,
+	})
+	if err != nil {
+		log.Fatal("invalid JWT configuration", zap.Error(err))
+	}
+
+	authHandler := &auth.Handler{DB: pool, Tokens: tokens}
 
 	satRepo := satellite.NewPostgresRepository(pool)
 	satService := satellite.NewService(satRepo)
@@ -56,7 +65,7 @@ func TestMain(m *testing.M) {
 	healthHandler := &health.Handler{DB: pool}
 
 	server := httpserver.NewServer(satHandler, userHandler, authHandler, healthHandler)
-	r := httpserver.NewRouter(server, docs.NewHandler(), cfg.JWTSecret, nil)
+	r := httpserver.NewRouter(server, docs.NewHandler(), tokens, nil)
 
 	ts := httptest.NewServer(r)
 	defer ts.Close()

@@ -297,7 +297,8 @@ docker compose up -d postgres
 cd api
 make generate
 
-# Start API
+# Start API (JWT_SECRET is required and must contain at least 32 bytes)
+export JWT_SECRET="$(openssl rand -hex 32)"
 go run cmd/server/main.go
 
 # Start local Kubernetes cluster
@@ -317,6 +318,7 @@ The CLI is for development and debugging only. The Agent and GitOps integration 
 ## Test prerequisites
 
 - API integration tests require a reachable PostgreSQL database with the project migrations applied and the development admin user seeded.
+- API startup and integration tests require `JWT_SECRET` to contain at least 32 bytes. `JWT_ISSUER` and `JWT_AUDIENCE` default to `fleetcontrol` and `fleetcontrol-api`.
 - Operator controller tests require Kubernetes `envtest` binaries; `make test` in `operator/` installs them through the existing setup target.
 
 ---

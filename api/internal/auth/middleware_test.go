@@ -5,11 +5,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 )
 
 func TestMiddleware_NoToken_Returns401(t *testing.T) {
-	handler := Middleware("test-secret")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := Middleware(newTestJWTManager(t))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -24,13 +23,13 @@ func TestMiddleware_NoToken_Returns401(t *testing.T) {
 }
 
 func TestMiddleware_ValidToken_StoresHumanPrincipal(t *testing.T) {
-	secret := "test-secret"
-	token, err := GenerateToken(secret, "user-1", "admin", time.Hour)
+	tokens := newTestJWTManager(t)
+	token, err := tokens.GenerateHumanToken("user-1", RoleAdmin)
 	if err != nil {
 		t.Fatalf("failed to generate token: %v", err)
 	}
 
-	handler := Middleware(secret)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := Middleware(tokens)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		principal, ok := PrincipalFromContext(r.Context())
 		if !ok {
 			t.Fatal("expected an authenticated principal in the request context")
@@ -62,23 +61,20 @@ func TestMiddleware_ValidToken_StoresHumanPrincipal(t *testing.T) {
 func TestMiddleware_InvalidHumanClaims_Returns401(t *testing.T) {
 	tests := []struct {
 		name   string
-		userID string
-		role   string
+		mutate func(*Claims)
 	}{
-		{name: "missing subject", userID: "", role: string(RoleAdmin)},
-		{name: "invalid role", userID: "user-1", role: "owner"},
+		{name: "missing subject", mutate: func(c *Claims) { c.Subject = "" }},
+		{name: "invalid role", mutate: func(c *Claims) { c.Role = HumanRole("owner") }},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			const secret = "test-secret"
-			token, err := GenerateToken(secret, tt.userID, tt.role, time.Hour)
-			if err != nil {
-				t.Fatalf("failed to generate token: %v", err)
-			}
+			claims := validTestClaims()
+			tt.mutate(&claims)
+			token := signTestHumanClaims(t, claims)
 
 			nextCalled := false
-			handler := Middleware(secret)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			handler := Middleware(newTestJWTManager(t))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				nextCalled = true
 				w.WriteHeader(http.StatusOK)
 			}))

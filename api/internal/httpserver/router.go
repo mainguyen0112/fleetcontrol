@@ -11,7 +11,7 @@ import (
 
 type Middleware func(http.Handler) http.Handler
 
-func NewRouter(server gen.ServerInterface, docsHandler *docs.Handler, jwtSecret string, requestLogger Middleware) http.Handler {
+func NewRouter(server gen.ServerInterface, docsHandler *docs.Handler, tokens *auth.JWTManager, requestLogger Middleware) http.Handler {
 	wrapper := &gen.ServerInterfaceWrapper{Handler: server}
 	r := chi.NewRouter()
 	if requestLogger != nil {
@@ -25,7 +25,7 @@ func NewRouter(server gen.ServerInterface, docsHandler *docs.Handler, jwtSecret 
 	r.Get("/docs", docsHandler.ServeUI)
 
 	r.Group(func(r chi.Router) {
-		r.Use(auth.Middleware(jwtSecret))
+		r.Use(auth.Middleware(tokens))
 		r.Post("/satellites", wrapper.PostSatellites)
 		r.Get("/satellites", wrapper.GetSatellites)
 		r.Get("/satellites/{id}", wrapper.GetSatellitesId)
@@ -35,7 +35,7 @@ func NewRouter(server gen.ServerInterface, docsHandler *docs.Handler, jwtSecret 
 	})
 
 	r.Group(func(r chi.Router) {
-		r.Use(auth.Middleware(jwtSecret))
+		r.Use(auth.Middleware(tokens))
 		r.Use(auth.RequireHumanRole(auth.RoleAdmin))
 		r.Post("/users", wrapper.PostUsers)
 		r.Get("/users", wrapper.GetUsers)

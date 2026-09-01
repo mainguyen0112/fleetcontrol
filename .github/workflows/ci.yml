@@ -27,7 +27,7 @@ jobs:
           --health-retries 10
     env:
       DB_URL: postgres://postgres:postgres@localhost:5432/fleetcontrol?sslmode=disable
-      JWT_SECRET: ci-secret
+      JWT_SECRET: fleetcontrol-ci-secret-at-least-32-bytes
       PGPASSWORD: postgres
     steps:
       - uses: actions/checkout@v4
