@@ -36,7 +36,7 @@ func NewRouter(server gen.ServerInterface, docsHandler *docs.Handler, jwtSecret 
 
 	r.Group(func(r chi.Router) {
 		r.Use(auth.Middleware(jwtSecret))
-		r.Use(auth.RequireRole("admin"))
+		r.Use(auth.RequireHumanRole(auth.RoleAdmin))
 		r.Post("/users", wrapper.PostUsers)
 		r.Get("/users", wrapper.GetUsers)
 		r.Delete("/users/{id}", wrapper.DeleteUsersId)

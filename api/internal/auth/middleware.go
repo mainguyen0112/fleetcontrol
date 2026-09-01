@@ -8,7 +8,23 @@ import (
 
 type contextKey string
 
-const ClaimsContextKey contextKey = "claims"
+const principalContextKey contextKey = "principal"
+
+// PrincipalFromContext returns the authenticated principal stored by
+// Middleware. The context key is private so callers cannot depend on raw
+// credential claims or replace the server-created identity accidentally.
+func PrincipalFromContext(ctx context.Context) (Principal, bool) {
+	principal, ok := ctx.Value(principalContextKey).(Principal)
+	if !ok || principal.Validate() != nil {
+		return Principal{}, false
+	}
+
+	return principal, true
+}
+
+func withPrincipal(ctx context.Context, principal Principal) context.Context {
+	return context.WithValue(ctx, principalContextKey, principal)
+}
 
 func Middleware(secret string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -26,17 +42,25 @@ func Middleware(secret string) func(http.Handler) http.Handler {
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), ClaimsContextKey, claims)
+			principal, err := NewHumanPrincipal(claims.UserID, HumanRole(claims.Role))
+			if err != nil {
+				http.Error(w, `{"error":{"code":"UNAUTHORIZED","message":"invalid token"}}`, http.StatusUnauthorized)
+				return
+			}
+
+			ctx := withPrincipal(r.Context(), principal)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
-func RequireRole(role string) func(http.Handler) http.Handler {
+// RequireHumanRole allows only human principals with the requested role.
+func RequireHumanRole(role HumanRole) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			claims, ok := r.Context().Value(ClaimsContextKey).(*Claims)
-			if !ok || claims.Role != role {
+			principal, ok := PrincipalFromContext(r.Context())
+			principalRole, isHuman := principal.HumanRole()
+			if !ok || !isHuman || principalRole != role {
 				http.Error(w, `{"error":{"code":"FORBIDDEN","message":"insufficient role"}}`, http.StatusForbidden)
 				return
 			}
